@@ -1,0 +1,22 @@
+
+.ERASE
+
+
+CC=wcl
+CFLAGS=-zq -fr -s
+AS=nasm
+#AFLAGS=-DTEST
+
+RM_F=rm -f
+
+
+all: patacd.sys .SYMBOLIC
+
+clean: .SYMBOLIC
+	$(RM_F) patacd.sys patacds.sys *.obj *.o
+
+patacd.sys: patacd.asm
+	$(AS) $(AFLAGS) -DSUPPORT_CD_PLAY -f bin -o $@ $<
+
+patacds.sys: patacd.asm
+	$(AS) $(AFLAGS) -f bin -o $@ $<
