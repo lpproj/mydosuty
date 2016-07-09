@@ -1332,6 +1332,33 @@ cd_erase_medium_info:
     ret
 
 
+; Open/Close tray
+; in
+; al  0=stop 2=open(eject) 3=close(load)
+
+ATAPIcmd_LoadCD:
+    call clear_atapi_packet
+    mov byte [atapi_packet], 01bh		; Start/Stop Unit
+;    mov byte [atapi_packet + 1], 1		; immed 
+    mov [atapi_packet + 4], al
+;    mov byte [atapi_packet + 8], 0		; SLOT (for load/unload CD cmd:A6h)
+    xor cx, cx
+    call cdbuf_atapicmd_common
+    ret
+
+; Lock/Unlock medium
+; in
+; al  0=unlock 1=lock
+
+ATAPIcmd_Lock:
+    call clear_atapi_packet
+    mov byte [atapi_packet], 1eh
+    mov [atapi_packet + 4], al
+    xor cx, cx
+    call cdbuf_atapicmd_common
+    ret
+
+
 ;
 ; Read CD
 ; in
@@ -1340,24 +1367,6 @@ cd_erase_medium_info:
 ;     bit15         1=raw (2352bytes/sct)  0=cooked (2048bytes/sct)
 ; es:si             memory address
 ;
-; note: max bytes in one transfer is 65535 , therefore cx is up to 31 (cooked) or 26 (raw)
-
-atapicmd_readcdlba_1sct:
-    push ax
-    push cx
-    push dx
-    xchg al, ah
-    mov [atapi_packet + 4], ax
-    xchg dl, dh
-    mov [atapi_packet + 2], dx
-    mov ax, 0100h
-    mov [atapi_packet + 7], ax	; transfer length = 1
-    mov cx, 0ffffh			; (todo: calc exact transfer bytes and check wraparound)
-    call userbuf_atapicmd_common
-    pop dx
-    pop cx
-    pop ax
-    ret
 
 ATAPIcmd_ReadCDLBA:
     call clear_atapi_packet
@@ -1396,6 +1405,59 @@ ATAPIcmd_ReadCDLBA:
   .exit:
     ret
 
+atapicmd_readcdlba_1sct:
+    push ax
+    push cx
+    push dx
+    xchg al, ah
+    mov [atapi_packet + 4], ax
+    xchg dl, dh
+    mov [atapi_packet + 2], dx
+    mov ax, 0100h
+    mov [atapi_packet + 7], ax	; transfer length = 1
+    mov cx, 0ffffh			; (todo: calc exact transfer bytes and check wraparound)
+    call userbuf_atapicmd_common
+    pop dx
+    pop cx
+    pop ax
+    ret
+
+
+;
+; Play CD
+; in
+; ds:si             lba packet (need ds = cs)
+;    +0 start LBA
+;    +4 end LBA
+;
+ATAPIcmd_PlayCDLBA:
+    call clear_atapi_packet
+    mov byte [atapi_packet], 47h
+    mov ax, [si]
+    mov dx, [si + 2]
+    call LBAtoAbsMSF_atapi
+    mov [atapi_packet + 3], ah
+    mov [atapi_packet + 4], dx
+    mov ax, [si + 4]
+    mov dx, [si + 6]
+    call LBAtoAbsMSF_atapi
+    mov [atapi_packet + 6], ah
+    mov [atapi_packet + 7], dx
+    xor cx, cx
+    call ATAPIcmd_withTimeout
+    ret
+
+;
+; Pause/Resume CD
+; in
+; al 0=pause 1=resume
+ATAPIcmd_PauseCD:
+    call clear_atapi_packet
+    mov byte [atapi_packet], 4bh
+    mov [atapi_packet + 8], al
+    xor cx, cx
+    call ATAPIcmd_withTimeout
+    ret
 
 ;---------------------------------------
 ; device stuff
@@ -1478,6 +1540,9 @@ Commands:
 %endif
     retf
 
+
+Command_ReadLongPrefetch:
+Command_Seek:
 Command_Unknown:
     mov ax, 8103h
     ret
@@ -1561,17 +1626,17 @@ cmd_table_00:
     dw Command_Close		; 14 Device Close
 
 cmd_table_80:
-    db 128, 128			; (from 128 to 136)
+    db 128, 136			; (from 128 to 136)
     dw Command_Unknown		; out of region
     dw Command_ReadLong		; 128 Read Long
-    ;dw Command_Unknown          ; 129 (reserved)
-    ;dw Command_ReadLongPrefetch ; 130 Read Long Prefetch
-    ;dw Command_Seek             ; 131 Seek
-    ;dw Command_Play             ; 132 Play Audio
-    ;dw Command_Stop             ; 133 Stop Audio
-    ;dw Command_Unknown          ; 134 Write Long
-    ;dw Command_Unknown          ; 135 Write Long Verify
-    ;dw Command_Resume           ; 136 Resume Audio
+    dw Command_Unknown          ; 129 (reserved)
+    dw Command_ReadLongPrefetch ; 130 Read Long Prefetch
+    dw Command_Seek             ; 131 Seek
+    dw Command_Play             ; 132 Play Audio
+    dw Command_Stop             ; 133 Stop Audio
+    dw Command_Unknown          ; 134 Write Long
+    dw Command_Unknown          ; 135 Write Long Verify
+    dw Command_Resume           ; 136 Resume Audio
 
 ;---------------------------------------
 
@@ -1823,16 +1888,16 @@ CD_AudioTrackInfo:
 
 CD_AudioQChannelInfo:
     call cdCheckDiscIn
-    jc .exit
+    jc cd_checkbusy.exit
     mov cx, 8100h			; CD-ROM position (MSF=1), track=0
     call CDBuf_ATAPIcmd_ReadSubChannel
-    jc .err_notready
+    jc cd_checkbusy.err_notready
     ;cmp [cd_buf + 4], 1
     ;jne .err
     mov al, [cd_buf + 5]
     ror al, 4
     test al, 0fh
-    jz .err_notready
+    jz cd_checkbusy.err_notready
     push di
     inc di
     stosb
@@ -1848,15 +1913,176 @@ CD_AudioQChannelInfo:
     mov al, [cd_buf + 11]		; AF
     stosb
     pop di
+cd_checkbusy:
     mov ax, 0100h
     cmp byte [cd_buf + 1], 11h		; set BUSY bit in playing audio
+;    je .busy
+;    cmp byte [cd_buf + 1], 12h		; and in pause
     jne .exit
+  .busy:
     or ah, 2h
   .exit:
     ret
   .err_notready:
     mov ax, 8102h
     ret
+
+; update cdplay_start
+; in
+; cl bit0  1=update in playing
+;    bit1  1=update in pause
+;
+;    bit7  1=set RedBook addr into dword[es: di + 3]
+; result
+; cy       0 = success
+; ch       cd audio state [cd_buf + 1]
+cd_update_cdplay_start:
+    push cx
+    mov cx, 8100h
+    call CDBuf_ATAPIcmd_ReadSubChannel
+    pop cx
+    mov ch, [cd_buf + 1]
+    jc .exit
+  .chk_playing:
+    test cl, 1
+    jz .chk_pause
+    cmp ch, 11h
+    je .get_msf
+  .chk_pause:
+    test cl, 2
+    jz .get_prevmsf
+    cmp ch, 12h
+    je .get_msf
+  .get_prevmsf:
+    mov ax, [cdplay_start_lba]
+    mov dx, [cdplay_start_lba + 2]
+    call LBAtoAbsMSF_dosdrv
+    jmp short .chk_write
+  .get_msf:
+    mov ax, [cd_buf + 4 + 6]		; (al = S, ah = F)
+    xchg al, ah				; -> al = F, ah = S
+    xor dh, dh
+    mov dl, [cd_buf + 4 + 5]		; dl = M
+  .chk_write:
+    test cl, 80h
+    jz .update_l2
+    mov [es: di + 3], ax
+    mov [es: di + 5], dx
+  .update_l2:
+    call AbsMSFtoLBA_dosdrv
+    mov [cdplay_start_lba], ax
+    mov [cdplay_start_lba + 2], dx
+  .exit:
+    ret
+
+
+CD_AudioStatusInfo:
+    xor ax, ax
+    mov [es: di + 1], ax
+    mov [es: di + 3], ax
+    mov [es: di + 5], ax
+    mov [es: di + 7], ax
+    mov [es: di + 9], ax
+    call cdCheckDiscIn
+    jc .exit
+    mov ax, [cdplay_end_lba]
+    or ax, [cdplay_end_lba + 2]
+    jz .exit
+    mov cl, 82h				; update in only pause, write addr to es:di + 3
+    call cd_update_cdplay_start
+    mov ax, [cdplay_end_lba]
+    mov dx, [cdplay_end_lba + 2]
+    call LBAtoAbsMSF_dosdrv
+    mov [es: di + 7], ax
+    mov [es: di + 9], dx
+    cmp ch, 11h
+    jne .exit
+    mov ax, 0300h
+    ret
+  .exit:
+    mov ax, 0100h
+    ret
+
+
+cdplay_packet:
+cdplay_start_lba:
+    dd 0
+cdplay_end_lba:
+    dd 0
+
+
+
+Command_Play:
+    les di, [request_header]
+    mov cl, [es: di + 13]
+    test cl, 0feh
+    jnz .err_param
+    mov ax, [es: di + 14]
+    mov dx, [es: di + 16]
+    test cl, 1
+    jz .l2
+    call AbsMSFtoLBA_dosdrv
+  .l2:
+    mov si, cdplay_packet
+    mov [si], ax
+    mov [si + 2], dx
+    add ax, [es: di + 18]
+    adc dx, [es: di + 20]
+    mov [si + 4], ax
+    mov [si + 6], dx
+    push cs
+    pop es
+    call ATAPIcmd_PlayCDLBA
+    mov ax, 0300h
+    jnc .just_ret
+    mov ax, 8102h
+  .err_param:
+    mov ax, 810ch
+  .just_ret:
+    ret
+
+
+Command_Stop:
+    call cdCheckDiscIn
+    jc .set_stop
+    mov cx, 8100h			; CD-ROM position (MSF=1), track=0
+    call CDBuf_ATAPIcmd_ReadSubChannel
+    jc .set_stop
+    cmp byte [cd_buf + 1], 11h		; playing?
+    je .do_pause
+  .do_stop:				; pause -> stop
+    mov al, 0
+    call ATAPIcmd_LoadCD
+  .set_stop:
+    xor ax, ax
+    mov [cdplay_start_lba], ax
+    mov [cdplay_start_lba + 2], ax
+    mov [cdplay_end_lba], ax
+    mov [cdplay_end_lba + 2], ax
+    jmp short .exit
+  .do_pause:
+    mov cl, 01h				; update cdplay_start_lba in playing
+    call cd_update_cdplay_start
+    mov ax, 0				; playing -> pause
+    call ATAPIcmd_PauseCD
+  .exit:
+    mov ax, 0100h
+    ret
+    
+
+Command_Resume:
+    mov ax, [cdplay_end_lba]
+    or ax, [cdplay_end_lba + 2]
+    jz .err_noresume
+    mov ax, 1
+    call ATAPIcmd_PauseCD
+    mov ax, 0300h
+    jnc .ret
+  .err_noresume:
+    mov ax, 810Ch
+  .ret:
+    ret
+
 
 %endif	; SUPPORT_CD_PLAY
 
@@ -1933,30 +2159,75 @@ CD_MediaChanged:
 
 
 CD_ResetDrive:
+    ;todo
+    mov byte [cd_need_update], 1
     jmp cd_done
 
-; todo
 CD_EjectDisk:
-CD_LockDoor:
-CD_WriteDeviceControlString:
+    call CDBuf_ATAPIcmd_TestUnitReady
+    mov ax, 2		; unload media
+    call ATAPIcmd_LoadCD
+    mov ax, 0100h
+    jc .err
+    ret
+  .err:
+    mov ax, 8102h
+    ret
+
 CD_CloseTray:
+    mov ax, 3
+    call ATAPIcmd_LoadCD
+    jc cd_chkerr_810c
+    call CDBuf_ATAPIcmd_TestUnitReady
+    mov ax, 0100h
+    jnc .ret
+    cmp byte [atapi_asc], 28h
+    je .ret
+    cmp byte [atapi_asc], 3ah
+    jne cd_chkerr_810c
+    mov ax, 8102h
+  .ret:
+    ret
+cd_chkerr_810c:
+    mov ax, 810ch
+    ret
+
+; todo
+CD_LockDoor:
+    call cdCheckDiscIn
+    jc .ret
+    mov al, [es: di + 1]
+    test al, 0feh
+    jnz cd_chkerr_810c
+    and al, 1
+    call ATAPIcmd_Lock
+    mov ax, 0100h
+    jc cd_chkerr_810c
+  .ret:
+    ret
+
 
 %ifndef SUPPORT_CD_PLAY
 CD_AudioChannelInfo:
 CD_AudioDiscInfo:
 CD_AudioTrackInfo:
 CD_AudioQChannelInfo:
-%endif
-CD_UPCCode:
 CD_AudioStatusInfo:
+Command_Play:
+Command_Stop:
+Command_Resume:
+%endif
+
+CD_UPCCode:
 CD_AudioChannelControl:
+
 %ifndef SUPPORT_RW_SUBCHANNELS
 CD_AudioSubChannelInfo:
 %endif
-
 %ifndef SUPPORT_DRIVE_BYTES
 CD_ReadDriveBytes:
 %endif
+CD_WriteDeviceControlString:
 CD_Unknown:
     mov ax, 8103h
     ret
