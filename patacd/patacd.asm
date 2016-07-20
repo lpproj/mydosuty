@@ -2905,17 +2905,39 @@ Init_Commands:
     call SwitchToNEC98
   .l2:
     mov cx, 8
-    mov di, device_name
+    mov di, devname
     rep movsb
     mov dx, si
     call putmsg
     mov dx, msgOpening2
     call putmsg_ln
+    
+    les bx, [request_header]
+    les si, [es: bx + 18]
+    call GetParams
+    jnc .l3
+    mov dx, errDeviceOption
+    call putmsg_ln
+    jmp short .not_resident
 
+  .l3:
+    push cs
+    pop es
     call DetectATAPICD
     jc .err_nocd
     
   .resident:
+    mov dx, msgDeviceName
+    call putmsg
+    mov si, devname
+    mov dx, si
+    mov di, device_name
+    push cs
+    pop es
+    mov cx, 8
+    rep movsb
+    call putmsg_ln
+    
     lds bx, [request_header]
     mov byte [bx + 13], 1
     mov word [bx + 14], TSR_bottom
@@ -2925,6 +2947,7 @@ Init_Commands:
     
   .err_nocd:
     mov dx, errNoCDROM
+  .err_msgdisp:
     call putmsg_ln
   .not_resident:
     lds bx, [request_header]
@@ -2950,6 +2973,145 @@ Init_Commands:
     retf
 
 
+GetParams:
+    push ds
+    push es
+    pop ds
+  .lp_scandelim:
+    lodsb
+    call isCRLF
+    je .exit
+    cmp al, 20h
+    ja .lp_scandelim
+    dec si
+  .lp_skipsp:
+    lodsb
+    call isCRLF
+    je .exit
+    cmp al, 20h
+    jbe .lp_skipsp
+    cmp al, '/'
+    je .chkopt
+    jmp short .lp_scandelim
+  .exit:
+    mov al, [cs: optD_err]
+    or al, al
+    jz .exit_2
+    stc
+  .exit_2:
+    pop ds
+    ret
+    ;
+  .chkopt:
+    lodsb
+    ;and al, 0E0h	; quick toupper
+    cmp al, 'D'
+    je .opt_d
+    jmp short .lp_scandelim
+    ;
+  .opt_d:
+    lodsb
+    cmp al, ':'
+    je .opt_d02
+    cmp al, '='
+    je .opt_d02
+    dec si
+  .opt_d02:
+    mov bx, si
+  .opt_dlp:
+    lodsb
+    cmp al, 20h
+    jbe .opt_d03
+    call chkDevChar
+    jnc .opt_dlp
+    mov byte [cs: optD_err], 1
+    jmp short .opt_dlp
+  .opt_d03:
+    dec si
+    mov cx, si
+    sub cx, bx
+    mov ax, 8
+    cmp cx, ax
+    jb .opt_d04
+    mov cx, ax
+  .opt_d04:
+    sub ax, cx
+    push si
+    push di
+    push ds
+    push es
+    mov si, bx
+    push es
+    pop ds
+    mov di, devname
+    push cs
+    pop es
+    rep movsb
+    mov cx, ax
+    mov al, 20h
+    rep stosb
+    pop es
+    pop ds
+    pop di
+    pop si
+    cmp byte [cs: devname], 20h
+    jne .optd_end
+    mov byte [cs: optD_err], 1
+  .optd_end:
+    jmp .lp_scandelim
+
+isCRLF:
+    cmp al, CR
+    je .ret
+    cmp al, LF
+  .ret:
+    ret
+
+chkDevChar:
+    cmp al, 'A'
+    jb .chkAZ_end
+    cmp al, 'Z'
+    jbe .ok
+  .chkAZ_end:
+    cmp al, 'a'
+    jb .chkaz_end
+    cmp al, 'z'
+    jbe .ok
+  .chkaz_end:
+    cmp al, '0'
+    jb .chknum_end
+    cmp al, '9'
+    jbe .ok
+  .chknum_end:
+    push cx
+    push di
+    push es
+    mov di, .avail
+    mov cx, .avail_end - .avail
+    push cs
+    pop es
+    repne scasb
+    pop es
+    pop di
+    pop cx
+    jne .no
+  .ok:
+    clc
+    ret
+  .no:
+    stc
+    ret
+  .avail:
+    db "!#$%'()-@_`{}~"
+  .avail_end:
+
+
+optD_err:
+    db 0
+devname:
+    db '        '
+    db eos
+
 msgOpening1:
     db 'PATACD: Generic ATAPI CD-ROM driver ', eos
 devnamePC98:
@@ -2965,6 +3127,12 @@ msgOpening2:
     db __UTC_DATE__, " ", __UTC_TIME__
     db ' UTC'
     db eos
+msgDeviceName:
+    db 'CD-ROM device name : '
+    db eos
 
 errNoCDROM:
     db 'error: No CD-ROM detected.', eos
+errDeviceOption:
+    db 'error: invalid option(s).', eos
+
