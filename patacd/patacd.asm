@@ -39,7 +39,7 @@ to build:
 %endif
 
 %define SUPPORT_CD_PLAY
-%define SUPPORT_AUDIO_CHANNEL
+;%define SUPPORT_AUDIO_CHANNEL
 ;%define SUPPORT_DRIVE_BYTES
 ;%define SUPPORT_RW_SUBCHANNELS
 
