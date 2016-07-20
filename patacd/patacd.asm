@@ -32,15 +32,22 @@ to build:
 ;------------------------------------------------------------------------------
 %endif
 
-;%define PRIVATE_STACK_SIZE 80
+;%define PRIVATE_STACK_SIZE 96
 
 %ifndef PRIVATE_STACK_SIZE
 %define PRIVATE_STACK_SIZE 0
 %endif
 
 %define SUPPORT_CD_PLAY
+%define SUPPORT_AUDIO_CHANNEL
 ;%define SUPPORT_DRIVE_BYTES
 ;%define SUPPORT_RW_SUBCHANNELS
+
+
+%ifndef SUPPORT_CD_PLAY
+%undef SUPPORT_AUDIO_CHANNEL
+%endif
+
 
 CR     equ 13
 LF     equ 10
@@ -137,6 +144,7 @@ device_name:
     db 0                        ; cddriver: drive letter (1=A, 2=B,...)
     db 1                        ; cddriver: number of units
 
+
 ; cd-rom drive
 
 cd_drvnum:
@@ -210,6 +218,8 @@ atapi_asc:
 atapi_ascq:
     db 0
 
+is_nec98:
+    db 0
 isNECCD260:
     db 0
 
@@ -222,9 +232,17 @@ atapi_packet_size:
     dw 12           ; 12 or 16
 atapi_packet:
     times 16 db 0
+atapi_max_bytecount:
+    dw 0
 atapi_bytecount:
     dw 0
 
+
+wait_bsy0_atapi:
+    mov dx, word [bx + OFS_ALTERNATE_STATUS]
+    in al, dx
+    mov dx, [bx + OFS_STATUS]
+    jmp short wait_bsy0.lp
 
 wait_bsy0:
     mov dx, word [bx + OFS_ALTERNATE_STATUS]
@@ -351,20 +369,22 @@ ATASelectDevice_withTimeout:
 ATASelectDevice:
   .lp1:
     mov al, [atareg + IDX_DEVICE]
-    mov ah, al
-    and ah, 10h               ; DEV
     mov dx, word [bx + OFS_DEVICE]
     out dx, al
     call [ata_wait_bsyvalid]  ; (need 400ns wait)
-    in al, dx                 ; check DEV bit
-    and al, 10h
-    cmp al, ah
-    mov ah, 0ffh
-    jne .error
     mov dx, word [bx + OFS_STATUS]
     in al, dx
     test al, 88h  ; check BSY=0 and DRQ=0
     jnz .lp_check_timeout
+    mov dx, [bx + OFS_DEVICE]		; check DEV bit
+    in al, dx
+    mov ah, [atareg + IDX_DEVICE]
+    and ax, 1010h
+    cmp ah, al
+    je .noerr
+    mov ah, 0ffh
+    jmp short .error
+  .noerr:
     xor ah, ah
     ret
   .lp_check_timeout:
@@ -439,12 +459,18 @@ ata_setlasterror:
     stc
     ret
 
-
 ATAReadStatus:
     mov dx, [bx + OFS_ALTERNATE_STATUS]
+  .l2:
     in al, dx
     call [ata_wait_bsyvalid]  ; (just for a proof)
     jmp short ata_checkstatus
+
+ATAPIReadStatus:
+    mov dx, [bx + OFS_ALTERNATE_STATUS]
+    in al, dx
+    mov dx, [bx + OFS_STATUS]
+    jmp short ATAReadStatus.l2
 
 
 ; ATAReadData
@@ -507,6 +533,36 @@ ATAPostProcess:
     pop ax
     popf
     ret
+
+
+%if 0
+ATAPIPostProcess:
+    pushf
+    push ax
+    ; send NOP command
+    xor ax, ax
+    mov dx, [bx + OFS_FEATURES]
+    out dx, al
+    mov dx, [bx + OFS_COMMAND]
+    out dx, al
+    call [ata_wait_bsyvalid]  ; (need 400ns wait)
+    mov dx, word [bx + OFS_STATUS]
+  .lp:
+    in al, dx
+    test al, 80h  ; check BSY=0 and DRQ=0
+    jz .l2
+    jmp short .lp
+  .l2:
+    mov dx, [BX + OFS_STATUS]
+    in al, dx
+    mov dx, [bx + OFS_DEVICE_CONTROL]
+    mov al, [atareg + IDX_DEVICE_CONTROL]
+    and al, 11111001b      ; SRST=0 (no reset), nIEN=0 (enable INTRQ)
+    out dx, al
+    pop ax
+    popf
+    ret
+%endif
 
 
 ;--------------------------------------
@@ -660,7 +716,6 @@ isTimeout_nec98:
     pop ax
     ret
 
-
 ATASelectPorts_nec98:
     push ax
     push dx
@@ -729,18 +784,20 @@ atapioin_exit:
     ret
 
 
-
 ; ATAPIOpacket
 ; in
 ; atapi_packet  packet command
 ; bx            ata portbase
 ; es:si         read/write data buffer (if extra data exist)
-; cx            max transfer bytes
+; cx            data transfer size
 ; ds            cs
 
 ATAPIOpacket:
     call ATASelectDevice
     jc .justret
+    mov [atapi_max_bytecount], cx
+    xor ax, ax
+    mov [atapi_bytecount], ax
     ; mov byte [atareg + IDX_DEVICE_CONTROL], 00001010b
     mov byte [atareg + IDX_FEATURES], 0
     mov byte [atareg + IDX_SECTOR_COUNT], 0         ; TAG
@@ -761,7 +818,8 @@ ATAPIOpacket:
     pop es
     pop si
     pop cx
-    call wait_bsy0
+  .lp:
+    call wait_bsy0_atapi
     jc .exit                  ; timeout
     test al, 1
     jnz .error2
@@ -772,28 +830,33 @@ ATAPIOpacket:
     test al, 00000101b        ; REL=0,C/D=0...more data to transfer
     jnz .fin
 %if 1
-    push ax
-    mov dx, [bx + OFS_BYTECOUNT_L]
-    in al, dx
-    mov cl, al
+    xchg ax, cx
     mov dx, [bx + OFS_BYTECOUNT_H]
     in al, dx
-    mov ch, al
-    pop ax
+    mov ah, al
+    mov dx, [bx + OFS_BYTECOUNT_L]
+    in al, dx
+    xchg ax, cx
 %endif
-    mov word [atapi_bytecount], cx
     or cx, cx                 ; clear CF
     jz .fin
+    push cx
     test al, 00000010b        ; I/O
     jz .todev
   .fromdev:
     call [atapi_read_data]    ; (ATAReadData)  I/O = 1
-    jmp short .fin
+    jmp short .rw_next
   .todev:
     call [atapi_write_data]   ; (ATAWriteData) I/O = 0
+  .rw_next:
+    pop cx
+    add cx, [atapi_bytecount]
+    mov [atapi_bytecount], cx
+    cmp cx, [atapi_max_bytecount]
+    jb .lp
     
   .fin:
-    call ATAReadStatus
+    call ATAPIReadStatus
     jnc .exit
   .error:
     cmp ah, 1
@@ -812,7 +875,11 @@ ATAPIOpacket:
   .errorexit:
     stc
   .exit:
+%if 0
+    call ATAPIPostProcess
+%else
     call ATAPostProcess
+%endif
   .justret:
     ret
 
@@ -820,7 +887,7 @@ ATAPIOpacket:
 ;
 ; ATAPIcmd_drive
 ; in
-; al  drive (0..4)
+; [ata_drivenum]  drive (0..4)
 ; atapi_packet  packet command
 ; es:si         read/write data buffer (if extra data exist)
 ; cx            max transfer bytes
@@ -869,6 +936,7 @@ ATAPIcmd_TestUnitReady:
     pop ax
     ret
 
+%ifdef TEST
 ATAPIcmd_Inquiry:
     call clear_atapi_packet
     mov byte [atapi_packet], 12h
@@ -881,6 +949,7 @@ ATAPIcmd_Inquiry:
   .err:
     mov ax, 0ffffh
     ret
+%endif
 
 
 ;---------------------------------------
@@ -975,9 +1044,14 @@ AbsMSFtoLBA_dosdrv:
 CDBuf_ATAPIcmd_TestUnitReady:
     call clear_atapi_packet
     ;mov byte [atapi_packet], 0
+    push cx
     mov cx, 0
     call cdbuf_atapicmd_common
+    pop cx
     jnc cd_check_media_inserted
+    cmp byte [atapi_asc], 28h
+    je CDBuf_ATAPIcmd_TestUnitReady
+    stc
     ret
 
 cd_check_media_inserted:
@@ -996,6 +1070,7 @@ CDBuf_ATAPIcmd_CurrentPosition:
     mov byte [atapi_packet + 2], 40h	; SubQ=1
     mov byte [atapi_packet + 3], 01h	; CD-ROM current position
     mov byte [atapi_packet + 8], 16	; data header + current posision blk
+    mov cx, 4 + 16
     call cdbuf_atapicmd_common
     jnc cd_check_media_inserted
     ret
@@ -1027,9 +1102,29 @@ CDBuf_ATAPIcmd_ReadCapacity:
     jmp short cd_check_media_inserted
 
 
+CDBuf_ATAPIcmd_Inquiry:
+    call clear_atapi_packet
+    mov cx, 36
+    mov byte [atapi_packet], 12h
+    mov [atapi_packet + 3], ch
+    mov [atapi_packet + 4], cl
+    call cdbuf_atapicmd_common
+    ret
+
+
+CDBuf_ATAPIcmd_ModeSelect:
+    call clear_atapi_packet
+    mov byte [atapi_packet], 55h
+    mov byte [atapi_packet + 1], 00010000b
+    mov byte [atapi_packet + 8], cl
+    xor ch, ch
+    jmp short cdbuf_atapicmd_common
+
+
 CDBuf_ATAPIcmd_ModeSense:
     call clear_atapi_packet
     mov byte [atapi_packet], 5ah
+    mov byte [atapi_packet + 1], 00001000b	; Disable Block Descriptor (INF-8090)
     mov byte [atapi_packet + 2], ch
     xor ch, ch
     mov byte [atapi_packet + 7], ch
@@ -1054,14 +1149,13 @@ userbuf_atapicmd_common:
 atapicmd_common_err:
     call cdbuf_atapicmd_getlastasc
     mov ax, 0ffffh
+    stc
     ret
 
-    
 
 cdbuf_atapicmd_getlastasc:
     pushf
     call clear_atapi_packet
-    push ax
     mov byte [atapi_packet], 03h
     mov cx, 18
 ;    mov byte [atapi_packet + 3], ch
@@ -1093,7 +1187,6 @@ cdbuf_atapicmd_getlastasc:
     mov byte [cd_media_inserted], 0	;
   .l3:
   .exit:
-    pop ax
     popf
     ret
 
@@ -1127,6 +1220,7 @@ CDBuf_ATAPIcmd_ReadSubChannel:
     mov ah, 4
   .w_len:
     mov word [atapi_packet + 7], ax
+    mov cx, 64 ; size_of_cdbuf (todo: set correct data length)
     jmp cdbuf_atapicmd_common
 
 
@@ -1462,19 +1556,20 @@ ATAPIcmd_PauseCD:
 ;---------------------------------------
 ; device stuff
 
-request_header:
-    dd 0
 
 %if (PRIVATE_STACK_SIZE > 0)
     align 4
+prev_stack:
+    dd 0
 ;private_stack:
     times (PRIVATE_STACK_SIZE) db 0cch
 private_stack_bottom:
-prev_stack:
-    dd 0
 private_stack_count:
     db 00h
 %endif
+
+request_header:
+    dd 0
 
 Strategy:
     mov word [cs: request_header], bx
@@ -1482,6 +1577,7 @@ Strategy:
     retf
 
 Commands:
+    pushf
 %if (PRIVATE_STACK_SIZE > 0)
     sub byte [cs: private_stack_count], 1
     jnc .cmd_entry
@@ -1494,6 +1590,7 @@ Commands:
     sti
   .cmd_entry:
 %endif
+    cld
     pusha
     push ds
     push es
@@ -1517,14 +1614,11 @@ Commands:
     add ax, ax
     add bx, ax
   .call_entry:
-    push di
-    push es
     mov cx, word [es: di + 18]
     les di, [es: di + 14]
     call word [bx]
-    pop es
-    pop di
-    mov word [es: di + 3], ax
+    lds di, [request_header]
+    mov word [di + 3], ax
   .exit:
     pop es
     pop ds
@@ -1538,6 +1632,7 @@ Commands:
     sti
   .just_ret:
 %endif
+    popf
     retf
 
 
@@ -1546,6 +1641,7 @@ Command_Seek:
 Command_Unknown:
     mov ax, 8103h
     ret
+
 
 ;Command_IOCTLin:
 ;Command_IOCTLout:
@@ -1574,6 +1670,7 @@ ioctl_inout:
     shl ax, 2
     add si, ax
     cmp cx, word [si + 2]
+    ;jne Command_Unknown
     jb Command_Unknown
     call word [si + 4]
     ret
@@ -1595,7 +1692,7 @@ ioctl_table_in:
     dw 11, CD_AudioQChannelInfo
     dw 13, CD_AudioSubChannelInfo
     dw 11, CD_UPCCode
-    dw 11, CD_AudioStatusInfo
+    dw 10, CD_AudioStatusInfo	; note: not 11 but 10 for Win3.1 MCICDA.drv
     
 
 ioctl_table_out:
@@ -1666,10 +1763,12 @@ cdCheckDiscIn:
   .update_disc_info:
     call cd_update_medium_info
     mov byte [cd_need_update], 0
+    jc .err_notready
     ret
   .chk_ready:
     cmp byte [atapi_asc], 28h		; (media changed?)
     je .l1
+  .err_notready:
     mov ax, 8102h			; not ready
   .errexit:
     stc
@@ -1718,13 +1817,7 @@ CD_ReadDriveBytes:
     ; (return vendor and product name of the drive for a test).
     call cdDriveNum
     jc .exit
-    push es
-    mov si, cd_buf
-    push cs
-    pop es
-    mov cx, 36
-    call ATAPIcmd_Inquiry
-    pop es
+    call CDBuf_ATAPIcmd_Inquiry
     jc .cmderr
     mov si, cd_buf + 8
     mov cx, 8 + 16 + 4
@@ -1770,18 +1863,28 @@ CD_DeviceStatus:
 %endif
     mov ax, [cd_buf + 8 + 6]		; sff8020: al=page2A[6] ah=page2A[7]
     xor al, 10b				; sff8020 page2A[6] bit1 Door Locked -> cddrive bit1 UNlocked
+%ifdef SUPPORT_AUDIO_CHANNEL
     and ah, 3				; sff8020: page2A[7] bit0 Separate Volume, bit1 Separate Mute
     add ah, 0ffh			; if AH > 0
     adc ah, 0				;   then set bit0 in AH (bit8 in AX)
     and ax, 100000010b			; cddriver: bit8 audio channel manipulation, bit1 door unlocked
     or dx, ax
+%else
+    and al, 00000010b			; cddriver: bit1 door unlocked
+    or dl, al
+%endif
     mov [cd_device_status], dx
-    ;hoge ; todo
     mov word [es: di + 1], dx
     mov word [es: di + 3], 0
     mov ax, 0100h
     ret
   .cmderr:
+    cmp byte [atapi_asc], 28h
+    jne .cmderr2
+    mov byte [cd_media_changed], 1
+    mov byte [cd_need_update], 1
+    jmp short .l1
+  .cmderr2:
     mov ax, 8102h
   .exit:
     ret
@@ -1790,6 +1893,8 @@ CD_DeviceStatus:
 
 
 %ifdef SUPPORT_CD_PLAY
+
+%ifdef SUPPORT_AUDIO_CHANNEL
 CD_AudioChannelInfo:
     call cdDriveNum
     jnc .l1
@@ -1797,16 +1902,22 @@ CD_AudioChannelInfo:
   .l1:
     mov ch, 0eh
     mov cl, 8 + 16
-    call CDBuf_ATAPIcmd_ModeSense
+    call cdbuf_atapicmd_modesense_with_changed
     jc .cmderr
     xor cx, cx
     mov si, cd_buf + 8 + 8
     inc di
   .lp:
-    lodsw
-    and al, 0fh				; channel selection == 0000b as mute
+    mov ax, [si + 20h]			; get mask
+    or al, al				; check mask for channel selection
+    jnz .l01
+    xor ax, ax				; channel not supported if mask==0
+    jmp short .lw
+  .l01:
+    and ax, [si]
+    and al, 0fh				; mute? (channel selection == 0000b)
     jnz .l02
-    mov ax, cx
+    mov ax, cx				; mute: al = chennel, ah = 0
     jmp short .lw
   .l02:					; channel selection == 1or2 as channel 0or1
     cmp al, 3
@@ -1832,6 +1943,7 @@ CD_AudioChannelInfo:
     mov ax, cx
   .lw:
     stosw
+    add si, 2
     inc cl
     cmp cl, 4
     jb .lp
@@ -1841,6 +1953,93 @@ CD_AudioChannelInfo:
     mov ax, 8102h
     ret
 
+CD_AudioChannelControl:
+    call cdDriveNum
+    jnc .l1
+    ret					; unknown unit (8101h)
+  .l1:
+    mov ch, 0eh
+    mov cl, 8 + 16
+    call cdbuf_atapicmd_modesense_with_changed
+    jc .cmderr
+    mov cx, 4
+    mov si, cd_buf + 8 + 8
+    inc di
+  .lp:
+    mov ax, [es: di]
+    and al, 3				; (todo: check bound)
+    inc al				; 0->1(channel0) 1->2(channel1)
+    cmp al, 2
+    jbe .l2
+    cmp al, 3
+    mov al, 4				; 2->4(channel2)
+    je .l2
+    mov al, 8				; 3->8(channel3)
+  .l2:
+;    or ah, ah
+;    jnz .l3
+;    mov al, 0				; volume 0 : mute
+  .l3:
+    mov [si], ax
+    add si, 2
+    add di, 2
+    loop .lp
+    mov cx, 8
+    mov si, cd_buf
+    push cx
+  .lp_wmask:
+    mov al, [si + 20h + 8 + 8]
+    and [si + 8 + 8], al
+    add si, 1
+    loop .lp_wmask
+    pop cx
+    ;mov ch, 0eh
+    mov cx, 8 + 16
+    call CDBuf_ATAPIcmd_ModeSelect	; todo
+    jc .cmderr
+    mov ax, 0100h
+    ret
+  .cmderr:
+    mov ax, 8102h
+    ret
+
+; cdbuf +00h ... -> mode sense page control=00b:current
+; cdbuf +20h ... -> mode sense page control=01b:changeable (mask) value
+cdbuf_atapicmd_modesense_with_changed:
+    call CDBuf_ATAPIcmd_TestUnitReady
+    push si
+    push di
+    push es
+    push ds
+    pop es
+  .get_changeable:
+    push cx
+    and ch, 00111111b
+    or ch, 01000000b			; changeable values
+    call CDBuf_ATAPIcmd_ModeSense
+    pop cx
+    jnc .copy_changeable
+;    cmp byte [atapi_asc], 28h		; media chaned -> retry
+;    je .get_changeable
+    push cx
+    mov di, cd_buf
+    xor ch, ch
+    mov al, 0ffh
+    rep stosb
+    pop cx
+  .copy_changeable:
+    push cx
+    mov si, cd_buf
+    mov di, cd_buf + 32
+    xor ch, ch
+    rep movsb
+    pop cx
+    pop es
+    pop di
+    pop si
+    jmp CDBuf_ATAPIcmd_ModeSense
+
+%endif		; SUPPORT_AUDIO_CHANNEL
 
 CD_AudioDiscInfo:
     call cdCheckDiscIn
@@ -1982,7 +2181,11 @@ CD_AudioStatusInfo:
     mov [es: di + 3], ax
     mov [es: di + 5], ax
     mov [es: di + 7], ax
-    mov [es: di + 9], ax
+    mov [es: di + 9], al
+    cmp cx, 10
+    jbe .l0
+    mov [es: di + 9], ah
+  .l0:
     call cdCheckDiscIn
     jc .exit
     mov ax, [cdplay_end_lba]
@@ -1994,7 +2197,7 @@ CD_AudioStatusInfo:
     mov dx, [cdplay_end_lba + 2]
     call LBAtoAbsMSF_dosdrv
     mov [es: di + 7], ax
-    mov [es: di + 9], dx
+    mov [es: di + 9], dl	; dx
     cmp ch, 11h
     jne .exit
     mov ax, 0300h
@@ -2013,6 +2216,8 @@ cdplay_end_lba:
 
 
 Command_Play:
+    call cdCheckDiscIn
+    jc .err_notready
     les di, [request_header]
     mov cl, [es: di + 13]
     test cl, 0feh
@@ -2035,6 +2240,7 @@ Command_Play:
     call ATAPIcmd_PlayCDLBA
     mov ax, 0300h
     jnc .just_ret
+  .err_notready:
     mov ax, 8102h
   .err_param:
     mov ax, 810ch
@@ -2145,6 +2351,19 @@ CD_ReturnVolumeSize:
 CD_MediaChanged:
     call cdCheckDiscIn
 ;    mov ax, 8102h
+%if 1
+    mov ax, 0100h
+    cmp byte [cd_media_changed], 0
+    je .l2
+    mov dl, 0ffh
+    mov byte [cd_media_changed], 0
+    jmp short .w_result
+  .l2:
+    mov dl, [cd_media_inserted]		; 0 (no disc) or 1 (inserted)
+    cmp dl, 0
+    jne .w_result
+    mov ax, 8102h
+%else
     mov dl, [cd_media_inserted]		; 0 (no disc) or 1 (inserted)
     jc .w_result			; (as far as I tested) when disc is not mounted, OAKCDROM will modify media byte to 0 and return as error (8102h)
     mov ax, 0100h
@@ -2152,6 +2371,7 @@ CD_MediaChanged:
     je .w_result
     mov dl, 0ffh
     mov [cd_media_changed], al		; read and clear internal change state
+%endif
   .w_result:
     mov [es: di + 1], dl
     ret
@@ -2160,7 +2380,7 @@ CD_MediaChanged:
 
 CD_ResetDrive:
     ;todo
-    mov byte [cd_need_update], 1
+    ; mov byte [cd_need_update], 1
     jmp cd_done
 
 CD_EjectDisk:
@@ -2168,25 +2388,28 @@ CD_EjectDisk:
     mov ax, 2		; unload media
     call ATAPIcmd_LoadCD
     mov ax, 0100h
-    jc .err
-    ret
-  .err:
+    jnc cd_chkerr_notready.ret
+    cmp byte [atapi_asc], 3ah
+    je cd_chkerr_notready.ret
+cd_chkerr_notready:
     mov ax, 8102h
+  .ret:
     ret
 
 CD_CloseTray:
+    call CDBuf_ATAPIcmd_TestUnitReady
     mov ax, 3
     call ATAPIcmd_LoadCD
-    jc cd_chkerr_810c
-    call CDBuf_ATAPIcmd_TestUnitReady
-    mov ax, 0100h
-    jnc .ret
+    jnc .noerr
     cmp byte [atapi_asc], 28h
-    je .ret
+    jne .chkasc
+    call CDBuf_ATAPIcmd_TestUnitReady
+    jnc .noerr
+  .chkasc:
     cmp byte [atapi_asc], 3ah
-    jne cd_chkerr_810c
-    mov ax, 8102h
-  .ret:
+    je cd_chkerr_notready
+  .noerr:
+    mov ax, 0100h
     ret
 cd_chkerr_810c:
     mov ax, 810ch
@@ -2200,15 +2423,20 @@ CD_LockDoor:
     test al, 0feh
     jnz cd_chkerr_810c
     and al, 1
+    push es
+    push ds
+    pop es
     call ATAPIcmd_Lock
+    pop es
     mov ax, 0100h
     jc cd_chkerr_810c
   .ret:
     ret
 
 
+; fallback to command error (8103h)
+
 %ifndef SUPPORT_CD_PLAY
-CD_AudioChannelInfo:
 CD_AudioDiscInfo:
 CD_AudioTrackInfo:
 CD_AudioQChannelInfo:
@@ -2217,9 +2445,12 @@ Command_Play:
 Command_Stop:
 Command_Resume:
 %endif
+%ifndef SUPPORT_AUDIO_CHANNEL
+CD_AudioChannelInfo:
+CD_AudioChannelControl:
+%endif
 
 CD_UPCCode:
-CD_AudioChannelControl:
 
 %ifndef SUPPORT_RW_SUBCHANNELS
 CD_AudioSubChannelInfo:
@@ -2279,8 +2510,6 @@ Command_ReadLong:
 
 
 
-
-
     align 16
 TSR_bottom:
 ;
@@ -2335,15 +2564,20 @@ ATAIdentifyDevice:
     push si
     push di
     mov di, si
-    add cx, 1       ; (cx+1)/2
-    rcr cx, 1
+    cmp cx, 512
+    jbe .rd_01
+    mov cx, 512
+  .rd_01:
+    inc cx
+    shr cx, 1
     mov si, 256
     sub si, cx
     ;pushf
     rep insw
     ;popf
-    jbe .readdata_end
+    ;jbe .readdata_end
     mov cx, si
+    jcxz .readdata_end
   .readdrop_lp:
     in ax, dx
     loop .readdrop_lp
@@ -2354,6 +2588,20 @@ ATAIdentifyDevice:
 
     call ATAReadStatus
     jc .exit
+    ; quick check data correctness
+    ; (model infomation chars are in ascii?)
+    cmp cx, 27 * 2 + 2
+    jb .isata_atapi
+    mov ax, word [es: si + (27 * 2)]		; Model Number (word 27~46)
+    cmp ah, 20h
+    jb .nodevice
+    cmp ah, 7fh
+    jae .nodevice
+    cmp al, 20h
+    jb .nodevice
+    cmp al, 7fh
+    jae .nodevice
+  .isata_atapi:
     ; quick check bit15,14 in word0
     ; bit15 14 
     ;     1  0 atapi
@@ -2401,6 +2649,7 @@ isNEC98:        ; detect IBMPC/NEC98 by checking int 1Ah AH=0 has (no) op
     int 1ah
     cmp cx, 0fffeh
     stc
+    mov byte [is_nec98], 1
     jz .exit
   .ibm:
     or al, al   ; just for ensure CF=0
@@ -2516,41 +2765,41 @@ putmsg_cx:
 
 DetectATAPICD:
     push bx
-    xor bx, bx
+    xor ax, ax
   .lp00:
-    mov [ata_drivenum], bx
+    mov [ata_drivenum], ax
+    mov [cd_drvnum], al
     mov dx, msgPrimary
-    test bl, 10b
+    test al, 10b
     jz .lp01m2
     mov dx, msgSecondary
   .lp01m2:
     call putmsg_verbose
     mov dx, msgMaster
-    test bl, 01b
+    test al, 01b
     jz .lp01m3
     mov dx, msgSlave
   .lp01m3:
     call putmsg_verbose
     mov si, ata_identify_buf
     mov cx, 256
-    push bx
     call ATAIdentifyDevice
-    pop bx
     jnc .check
   .nodev:
     mov dx, msgNone
     call putmsg_verbose
   .next:
     call putn_verbose
-    inc bl
-    cmp bl, 4
+    mov ax, [ata_drivenum]
+    inc ax
+    cmp ax, 4
     jb .lp00
-    mov bx, 0ffffh
+    mov ax, 0ffffh
+    mov [ata_drivenum], ax
+    mov [cd_drvnum], al
     stc
   .exit:
-    mov [ata_drivenum], bx
-    mov [cd_drvnum], bl
-    mov ax, bx
+    mov ax, [ata_drivenum]
     pop bx
     ret
   ; check ATA(PI) device
@@ -2570,14 +2819,10 @@ DetectATAPICD:
     call putmsg_verbose
     jmp short .next
   .atapi_inquiry:
-    mov [cd_drvnum], bl
     ; to check NECCD, use inquiry command
-    mov si, cd_buf
-    mov cx, 36
-    push bx
-    call ATAPIcmd_Inquiry
-    pop bx
+    call CDBuf_ATAPIcmd_Inquiry
     jc .nodev
+    mov si, cd_buf
     push si
     add si, 8
     mov cx, 8 + 16 + 4
