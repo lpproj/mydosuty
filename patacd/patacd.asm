@@ -535,7 +535,7 @@ ATAPostProcess:
     ret
 
 
-%if 0
+%if 1
 ATAPIPostProcess:
     pushf
     push ax
@@ -875,7 +875,7 @@ ATAPIOpacket:
   .errorexit:
     stc
   .exit:
-%if 0
+%if 1
     call ATAPIPostProcess
 %else
     call ATAPostProcess
@@ -1049,7 +1049,9 @@ CDBuf_ATAPIcmd_TestUnitReady:
     call cdbuf_atapicmd_common
     pop cx
     jnc cd_check_media_inserted
-    cmp byte [atapi_asc], 28h
+    cmp byte [atapi_asc], 28h		; NOT READY TO READY CHANGE
+    je CDBuf_ATAPIcmd_TestUnitReady
+    cmp word [atapi_asc], 0104h		; LOGICAL UNIT IS IN PROGRESS OF BECOMING READY
     je CDBuf_ATAPIcmd_TestUnitReady
     stc
     ret
