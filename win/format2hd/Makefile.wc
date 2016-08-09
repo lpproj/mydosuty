@@ -1,0 +1,18 @@
+RM=rm -f
+
+
+all: format2hd.exe
+
+clean: .SYMBOLIC
+	-$(RM) *.obj format2hd.exe
+	-$(RM) bin2list.exe bin2list.obj bin2list bin2list.o
+	-$(RM) bootdumy.bin
+
+format2hd.exe: format2hd.c bootdumy.h
+	wcl386 -zq -s -fr -onetx -fe=$@ $[@ -l=nt
+
+bootdumy.h: bootdumy.asm
+	wcl386 -zq -s -fr -onetx bin2list.c
+	nasm -f bin -o bootdumy.bin bootdumy.asm
+	bin2list bootdumy.bin $^@
+
