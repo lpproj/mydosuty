@@ -50,19 +50,21 @@ boot0:
 boot1:
     cld
     mov cx, msgNoSystem_end - msgNoSystem
+    push cx
     ; detect machine which is PC-98x1/IBM by int 1Ah
     ; (need more bytes than by int 10h ah=0Fh, but probably safer...)
-    mov dh, 0ffh
+    mov cl, 0ffh
     mov ah, 0
     int 1ah
-    inc dh
+    inc cl
     jnz boot1_ibmpc
-    mov dh, 0feh
+    mov cl, 0feh
     int 1Ah
-    cmp dh, 0feh
+    cmp cl, 0feh
     je boot1_nec98
 
 boot1_ibmpc:
+    pop cx
     xor ax, ax
     mov ds, ax
     mov es, ax
@@ -89,6 +91,7 @@ boot1_ibmpc:
     
 ;
 boot1_nec98:
+    pop cx
     push cs
     pop ds
     mov ah, 0ch         ; show screen
