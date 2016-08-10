@@ -362,7 +362,7 @@ DWORD write_fs_fat12(HANDLE hDrv, const BPBCORE *bpb, const void *bootsect)
 		pokeow(buf, 39, serial & 0xffff);
 		pokeow(buf, 39 + 2, (serial >> 16) & 0xffff);
 		CopyMemory(buf + 43, "NO NAME    ", 11);
-		CopyMemory(buf + 55, "FAT12   ", 8);
+		CopyMemory(buf + 54, "FAT12   ", 8);
 	}
 
 	buf[510] = 0x55;
