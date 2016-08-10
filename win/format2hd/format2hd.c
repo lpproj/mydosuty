@@ -133,7 +133,7 @@ DWORD DevIo_WithErr(HANDLE hDev, DWORD dwCode, LPVOID in, DWORD cb_in, LPVOID ou
 	BOOL rc;
 	DWORD dw;
 	SetLastError(0);
-	rc = DeviceIoControl(hDev, dwCode, in, cb_in, out, cb_out, cb_get, lpo);
+	rc = DeviceIoControl(hDev, dwCode, in, cb_in, out, cb_out, cb_get ? cb_get : &dw, lpo);
 	dw = GetLastError();
 	if (!rc && dw == 0) dw = (DWORD)-1L;
 	return dw;
