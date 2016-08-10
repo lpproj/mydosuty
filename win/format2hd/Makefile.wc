@@ -1,3 +1,5 @@
+.ERASE
+
 RM=rm -f
 
 
