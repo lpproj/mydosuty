@@ -89,6 +89,7 @@ struct ERRNAME {
 	DWORD dwErr;
 	char *sErr;
 } errname[] = {
+	{ ERROR_INVALID_FUNCTION, "Invalid Function (IOCTL Error)" },
 	{ ERROR_ACCESS_DENIED, "Access Denied" },
 	{ ERROR_INVALID_HANDLE, "Invalid Handle" },
 	{ ERROR_NOT_ENOUGH_MEMORY, "Not Enough Memory" },
@@ -104,6 +105,7 @@ struct ERRNAME {
 	{ ERROR_INVALID_PARAMETER, "Invalid Parameter" },
 	
 	{ ERROR_IO_DEVICE, "Device I/O Error" },
+	{ ERROR_MEDIA_CHANGED, "Media Changed" },
 	{ ERROR_UNRECOGNIZED_MEDIA, "Wrong (unrecognized) Media"},
 	{ 0, NULL }
 };
@@ -132,10 +134,25 @@ DWORD DevIo_WithErr(HANDLE hDev, DWORD dwCode, LPVOID in, DWORD cb_in, LPVOID ou
 {
 	BOOL rc;
 	DWORD dw;
-	SetLastError(0);
-	rc = DeviceIoControl(hDev, dwCode, in, cb_in, out, cb_out, cb_get ? cb_get : &dw, lpo);
-	dw = GetLastError();
-	if (!rc && dw == 0) dw = (DWORD)-1L;
+	DWORD timeout_ms = 5000;
+	DWORD tick_start = GetTickCount();
+
+	if (dwCode == IOCTL_DISK_FORMAT_TRACKS || dwCode == IOCTL_DISK_FORMAT_TRACKS_EX)
+		timeout_ms = 30000;
+
+	do {
+		DWORD tick, difftick;
+		SetLastError(0);
+		rc = DeviceIoControl(hDev, dwCode, in, cb_in, out, cb_out, cb_get ? cb_get : &dw, lpo);
+		dw = GetLastError();
+		if (!rc && dw == 0) dw = (DWORD)-1L;
+		if (dw != ERROR_NOT_READY && dw != ERROR_IO_DEVICE /* && dw != ERROR_MEDIA_CHANGED */) break;
+		tick = GetTickCount();
+		difftick = (tick >= tick_start) ? tick - tick_start : (((DWORD)-1L) - tick_start) + 1 + tick;
+		if (difftick >= timeout_ms) break;
+		Sleep(1500);
+	} while(1);
+
 	return dw;
 }
 
@@ -236,17 +253,22 @@ BOOL is_drive_fdd(int drive0, BOOL *is_5inch)
 	DWORD dwRC, dwlen;
 	BOOL rc = FALSE;
 	BOOL b5inch = FALSE;
+	unsigned try_count = 3;
 
 	hDrive = open_drive_a(drive0, 0);
 	if (hDrive == INVALID_HANDLE_VALUE) return FALSE;
 
 	ZeroMemory(g, sizeof(g));
-	dwRC = DevIo_WithErr(hDrive,
-	                     IOCTL_DISK_GET_MEDIA_TYPES /* IOCTL_STORAGE_GET_MEDIA_TYPES (will not work for FDD...) */,
-	                     NULL, 0, 
-	                     &g, sizeof(g),
-	                     &dwlen,
-	                     NULL);
+	while(try_count-- > 0) {
+		dwRC = DevIo_WithErr(hDrive,
+		                     IOCTL_DISK_GET_MEDIA_TYPES /* IOCTL_STORAGE_GET_MEDIA_TYPES (will not work for FDD...) */,
+		                     NULL, 0, 
+		                     &g, sizeof(g),
+		                     &dwlen,
+		                     NULL);
+		if (dwRC != ERROR_INVALID_DRIVE && dwRC != ERROR_MEDIA_CHANGED) break;
+		Sleep(1500);
+	}
 
 	if (dwRC == 0) {
 		unsigned i, n;
@@ -422,8 +444,9 @@ DWORD format_fd_bpb(int drive0, const BPBCORE *bpb, int do_verify, int buildfs, 
 	}
 	SetFilePointer(hDrive, 0, NULL, FILE_BEGIN);
 	dwRC = format_track_bpb(hDrive, bpb, mediaType, 0, 0);
-	DevIo_NoParam(hDrive,  FSCTL_UNLOCK_VOLUME);
+	if (dwRC == 0) dwRC = format_track_bpb(hDrive, bpb, mediaType, 0, 0);
 	DevIo_NoParam(hDrive,  FSCTL_DISMOUNT_VOLUME);
+	DevIo_NoParam(hDrive,  FSCTL_UNLOCK_VOLUME);
 	CloseHandle(hDrive);
 	if (dwRC != 0) {
 		return dwRC;
@@ -455,8 +478,8 @@ DWORD format_fd_bpb(int drive0, const BPBCORE *bpb, int do_verify, int buildfs, 
 		}
 	}
 
-	DevIo_NoParam(hDrive,  FSCTL_UNLOCK_VOLUME);
 	DevIo_NoParam(hDrive,  FSCTL_DISMOUNT_VOLUME);
+	DevIo_NoParam(hDrive,  FSCTL_UNLOCK_VOLUME);
 
 	CloseHandle(hDrive);
 
@@ -563,6 +586,14 @@ void put_usage(void)
 		"           do format without waiting keyboard input by user\n"
 		;
 
+	printf("%s", progname);
+	printf(" (");
+#if defined(WIN64)
+	printf("Win64");
+#else
+	printf("Win32");
+#endif
+	printf(", built at " __DATE__ " " __TIME__ ")\n");
 	printf(msg, progname);
 }
 
