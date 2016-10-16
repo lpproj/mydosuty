@@ -3,10 +3,10 @@
 RM=rm -f
 
 
-all: format2hd.exe
+all: format2hd.exe unmountfs.exe
 
 clean: .SYMBOLIC
-	-$(RM) *.obj format2hd.exe
+	-$(RM) *.obj format2hd.exe unmountfs.exe
 	-$(RM) bin2list.exe bin2list.obj bin2list bin2list.o
 	-$(RM) bootdumy.bin
 
@@ -17,4 +17,7 @@ bootdumy.h: bootdumy.asm
 	wcl386 -zq -s -fr -onetx bin2list.c
 	nasm -f bin -o bootdumy.bin bootdumy.asm
 	bin2list bootdumy.bin $^@
+
+unmountfs.exe: unmountfs.c
+	wcl386 -zq -s -fr -onetx -fe=$@ $[@ -l=nt
 

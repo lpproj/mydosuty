@@ -16,10 +16,10 @@ BASEDIR=..$(D)
 
 
 
-all: format2hd.exe
+all: format2hd.exe unmountfs.exe
 
 clean:
-	-$(RM) *.$(O) format2hd.exe
+	-$(RM) *.$(O) format2hd.exe unmountfs.exe
 	-$(RM) bin2list$(HOST_X) bin2list bin2list.$(O)
 	-$(RM) bootdumy.bin
 
@@ -30,4 +30,7 @@ $(BASEDIR)bootdumy.h: $(BASEDIR)bootdumy.asm $(BASEDIR)bin2list.c
 	$(HOST_CC) -o bin2list$(HOST_X) $(BASEDIR)bin2list.c
 	$(AS) -f bin -o bootdumy.bin $(BASEDIR)bootdumy.asm
 	.$(D)bin2list bootdumy.bin $@
+
+unmountfs.exe: $(BASEDIR)unmountfs.c
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
