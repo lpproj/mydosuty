@@ -87,6 +87,9 @@ DWORD unmountfs(int drivenum0)
 		dwRC = DevIo_NoParam(h, FSCTL_DISMOUNT_VOLUME);
 		CloseHandle(h);
 	}
+	else {
+		dwRC = GetLastError();
+	}
 	SetErrorMode(uPrevErrMode);
 
 	return dwRC;
@@ -117,7 +120,7 @@ int main(int argc, char *argv[])
 			dwRC = unmountfs(drive0);
 			if (dwRC == 0) printf("ok\n");
 			else {
-				printf("failure! (result=%lu)", (unsigned long)dwRC);
+				printf("failure! (errcode=%lu)\n", (unsigned long)dwRC);
 				if (!optF) break;
 			}
 		}
