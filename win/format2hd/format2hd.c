@@ -39,7 +39,7 @@
 #define _T TEXT
 #endif
 
-#define ALLOW_DMF
+/* #define ALLOW_DMF */
 
 
 const unsigned char bootsect_dummy[512] = {
