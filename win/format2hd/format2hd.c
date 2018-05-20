@@ -29,6 +29,7 @@
 #include <conio.h>
 #include <windows.h>
 #include <ctype.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,6 +39,7 @@
 #define _T TEXT
 #endif
 
+#define ALLOW_DMF
 
 
 const unsigned char bootsect_dummy[512] = {
@@ -65,6 +67,9 @@ BPBCORE bpb_2hd = { 1024, 1, 1, 2, 0xc0, 8*2*77, 0xfe, 2, 8, 2 };
 BPBCORE bpb_1440 = { 512, 1, 1, 2, 0xe0, 18*2*80, 0xf0, 9, 18, 2 };
 BPBCORE bpb_2880 = { 512, 1, 1, 2, 0xf0, 36*2*80, 0xf0, 9, 36, 2 };
 
+BPBCORE bpb_1840 = { 512, 1, 1, 2, 0xe0, 23*2*80, 0xf0, 11, 23, 2 };
+BPBCORE bpb_1680dmf = { 512, 4, 1, 2, 0x10, 21*2*80, 0xf0, 3, 21, 2 };
+
 
 MEDIA_TYPE MediaTypeFromBPB(const BPBCORE *bpb, int is_5inch)
 {
@@ -76,6 +81,9 @@ MEDIA_TYPE MediaTypeFromBPB(const BPBCORE *bpb, int is_5inch)
 		if (bpb->sectors_per_head == 9) return is_5inch ? F5_720_512 : F3_720_512;
 		if (bpb->sectors_per_head == 15) return is_5inch ? F5_1Pt2_512 : F3_1Pt2_512;
 		if (bpb->sectors_per_head == 18) return F3_1Pt44_512;
+#if defined(ALLOW_DMF)
+		if (bpb->sectors_per_head >= 19 && bpb->sectors_per_head <= 24) return F3_1Pt44_512;
+#endif
 		if (bpb->sectors_per_head == 36) return F3_2Pt88_512;
 	}
 	if (bpb->media_descriptor == 0xf0) return RemovableMedia;
@@ -102,6 +110,7 @@ struct ERRNAME {
 	{ ERROR_NOT_DOS_DISK, "Not MS-DOS Compatible Disk" },
 	{ ERROR_SECTOR_NOT_FOUND, "Sector Not found" },
 	{ ERROR_LOCK_VIOLATION, "Can't Lock" },
+	{ ERROR_NOT_SUPPORTED, "Not Supported" },
 	{ ERROR_INVALID_PARAMETER, "Invalid Parameter" },
 	
 	{ ERROR_IO_DEVICE, "Device I/O Error" },
@@ -195,7 +204,44 @@ HANDLE open_drive_a(int drive0, DWORD dw_acc)
 }
 
 
-DWORD format_track(HANDLE hDrive, MEDIA_TYPE mediaType, DWORD cylinder, DWORD head)
+#if defined(ALLOW_DMF)
+DWORD format_track(HANDLE hDrive, MEDIA_TYPE mediaType, DWORD cylinder, DWORD head, int sector)
+{
+	DWORD dwRC = (DWORD)-1;
+	
+	if (mediaType == F3_1Pt44_512 && sector != 0 && sector > 18) {
+		WORD n;
+		BYTE expbuf[sizeof(FORMAT_EX_PARAMETERS) + sizeof(WORD)*255];
+		DWORD expbufsiz;
+		FORMAT_EX_PARAMETERS *exfm;
+
+		exfm = (void *)expbuf;
+		expbufsiz = offsetof(FORMAT_EX_PARAMETERS, SectorNumber[sector]);
+		ZeroMemory(exfm, sizeof(expbuf));
+		exfm->MediaType = mediaType;
+		exfm->StartCylinderNumber = exfm->EndCylinderNumber = cylinder;
+		exfm->StartHeadNumber = exfm->EndHeadNumber = head;
+		exfm->SectorsPerTrack = sector;
+		for(n=0; n<sector; ++n) {
+			exfm->SectorNumber[n] = n + 1;
+		}
+		exfm->FormatGapLength = (sector > 18) ? 0x0c : 108;	/* 1440 = 0x1b 1680 = 0x0c */
+		dwRC = DevIo_WithErr(hDrive, IOCTL_DISK_FORMAT_TRACKS_EX, exfm, expbufsiz, NULL, 0, NULL, NULL);
+	}
+	else {
+		FORMAT_PARAMETERS fm;
+		ZeroMemory(&fm, sizeof(fm));
+		fm.MediaType = mediaType;
+		fm.StartCylinderNumber = fm.EndCylinderNumber = cylinder;
+		fm.StartHeadNumber = fm.EndHeadNumber = head;
+		dwRC = DevIo_WithErr(hDrive, IOCTL_DISK_FORMAT_TRACKS, &fm, sizeof(fm), NULL, 0, NULL, NULL);
+	}
+	if (dwRC == ERROR_IO_DEVICE && isDiskWriteProtected(hDrive)) dwRC = ERROR_WRITE_PROTECT;
+
+	return dwRC;
+}
+#else
+DWORD format_track(HANDLE hDrive, MEDIA_TYPE mediaType, DWORD cylinder, DWORD head, int sector)
 {
 	DWORD dwRC;
 	FORMAT_PARAMETERS fm;
@@ -209,6 +255,7 @@ DWORD format_track(HANDLE hDrive, MEDIA_TYPE mediaType, DWORD cylinder, DWORD he
 
 	return dwRC;
 }
+#endif
 
 
 DWORD format_track_bpb(HANDLE hDrive, const BPBCORE *bpb, MEDIA_TYPE mediaType, unsigned track, int do_verify)
@@ -216,7 +263,7 @@ DWORD format_track_bpb(HANDLE hDrive, const BPBCORE *bpb, MEDIA_TYPE mediaType, 
 	DWORD dwRC;
 	LPVOID ptrkbuf = NULL;
 	DWORD ntrkbuf = 0;
-	unsigned cylinder, head;
+	unsigned cylinder, head, sector;
 	
 	if (do_verify > 0) {
 		ntrkbuf = (DWORD)(bpb->sectors_per_head) * bpb->bytes_per_sector;
@@ -226,8 +273,9 @@ DWORD format_track_bpb(HANDLE hDrive, const BPBCORE *bpb, MEDIA_TYPE mediaType, 
 
 	cylinder = track / bpb->heads_per_track;
 	head = track % bpb->heads_per_track;
+	sector = bpb->sectors_per_head;
 
-	dwRC = format_track(hDrive, mediaType, cylinder, head);
+	dwRC = format_track(hDrive, mediaType, cylinder, head, sector);
 	if (dwRC == 0 && do_verify > 0) {
 		DWORD dwfp = ntrkbuf * (cylinder * bpb->heads_per_track + head);
 		DWORD ntrkbuf_read;
@@ -426,7 +474,16 @@ DWORD format_fd_bpb(int drive0, const BPBCORE *bpb, int do_verify, int buildfs, 
 			int c;
 			fprintf(stderr, "Insert a disk to drive %c:\n", 'A' + drive0);
 			fprintf(stderr, "and press Enter when ready.");
-			do { c = _getch(); } while (c != EOF && (c & 0xff) != 13 && (c & 0xff) != 10);
+			do {
+				c = _getch();
+				switch(c & 0xff) {
+					case 13: case 10:
+						c = 13;
+						break;
+					case 0x1b: case 0x03:
+						exit(1);
+				}
+			} while (c != EOF && c != 13);
 			fprintf(stderr, "\n");
 		}
 	}
@@ -545,8 +602,11 @@ int mygetopt(int argc, char *argv[])
 						else if (eqf(s, "720") || eqf(s, "2DD")) opt_bpb = &bpb_720;
 						else if (eqf(s, "2HD") || eqf(s, "1.23") || eqf(s, "1.25") || eqf(s, "123") || eqf(s, "125")) opt_bpb = &bpb_2hd;
 						else if (eqf(s, "1.44") || eqf(s, "144")) opt_bpb = &bpb_1440;
-						else if (eqf(s, "2.88") || eqf(s, "288")) opt_bpb = &bpb_2880;
+						else if (eqf(s, "2.88") || eqf(s, "288") || eqf(s, "2ED")) opt_bpb = &bpb_2880;
 						else if (eqf(s, "2HC") || strcmp(s, "1.2")==0 || eqf(s, "120")) opt_bpb = &bpb_2hc;
+#if defined(ALLOW_DMF)
+						else if (eqf(s, "168") || eqf(s, "DMF")) opt_bpb = &bpb_1680dmf;
+#endif
 					}
 					break;
 			}
@@ -579,6 +639,9 @@ void put_usage(void)
 		"     2DD   same as /F:720\n"
 		"     2HC   same as /F:1.2\n"
 		"     2HD   same as /F:1.23\n"
+#if defined(ALLOW_DMF)
+		"     DMF   1.68M Microsoft DMF (21sectors, 80cylinders, 512bytes per sector)\n"
+#endif
 		"\n"
 		"  /RAW     format only (do not build FAT filesystem after format)\n"
 		"  /VERIFY  format with verify (simply abort when error)\n"
