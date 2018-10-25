@@ -1,0 +1,26 @@
+.ERASE
+
+RM=rm -f
+UPX=upx
+#UPX=@echo	upx
+
+all: csr.exe
+
+clean: .SYMBOLIC
+	-$(RM) *.obj *.err
+	-$(RM) csrd16.exe csrw32.exe
+	-$(RM) csr.exe
+
+
+csr.exe: csrw32.obj csrd16.exe
+	wcl386 -zq -s -fr -bt=nt -fe=$@ $[@ -l=nt -"op stub=csrd16.exe"
+
+
+csrd16.exe: csr.c
+	wcl -zq -s -os -fr -bt=dos -fe=$@ $[@
+	$(UPX) --8086 --best $@
+
+csrw32.obj: csr.c
+	wcl386 -zq -s -fr -bt=nt -c -fo=$@ $[@
+
+
