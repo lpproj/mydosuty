@@ -109,6 +109,7 @@ struct ERRNAME {
 	{ ERROR_SEEK, "Seek Error" },
 	{ ERROR_NOT_DOS_DISK, "Not MS-DOS Compatible Disk" },
 	{ ERROR_SECTOR_NOT_FOUND, "Sector Not found" },
+	{ ERROR_SHARING_VIOLATION, "Sharing Violation" },
 	{ ERROR_LOCK_VIOLATION, "Can't Lock" },
 	{ ERROR_NOT_SUPPORTED, "Not Supported" },
 	{ ERROR_INVALID_PARAMETER, "Invalid Parameter" },
@@ -190,13 +191,27 @@ HANDLE open_drive_a(int drive0, DWORD dw_acc)
 	UINT uPrevErrMode;
 	DWORD dwErr;
 	TCHAR volpn[10];
+	int try_count = 3;
 
 	lstrcpy(volpn, _T("\\\\.\\?:"));
 	volpn[4] = _T(( 'A' + drive0));
 
-	uPrevErrMode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
-	h = CreateFile(volpn, dw_acc, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_WRITE_THROUGH | FILE_FLAG_NO_BUFFERING, NULL);
 	dwErr = GetLastError();
+	uPrevErrMode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
+	while(try_count-- > 0) {
+		/* not certain about FILE_SHARE_xxx and FILE_FLAG_xxx */
+		h = CreateFile(volpn
+		             , dw_acc
+		             , FILE_SHARE_READ /* | FILE_SHARE_WRITE */
+		             , NULL
+		             , OPEN_EXISTING
+		             , FILE_FLAG_NO_BUFFERING /* | FILE_FLAG_WRITE_THROUGH */
+		             , NULL);
+		dwErr = GetLastError();
+		if ((h != INVALID_HANDLE_VALUE || dwErr != ERROR_SHARING_VIOLATION)) break;
+		Sleep(1500); /* wait for retry in sharing violation */
+	}
+	if (h != INVALID_HANDLE_VALUE) FlushFileBuffers(h);
 	SetErrorMode(uPrevErrMode);
 	SetLastError(dwErr);
 
@@ -301,7 +316,7 @@ BOOL is_drive_fdd(int drive0, BOOL *is_5inch)
 	DWORD dwRC, dwlen;
 	BOOL rc = FALSE;
 	BOOL b5inch = FALSE;
-	unsigned try_count = 3;
+	int try_count = 1;
 
 	hDrive = open_drive_a(drive0, 0);
 	if (hDrive == INVALID_HANDLE_VALUE) return FALSE;
@@ -445,6 +460,7 @@ DWORD write_fs_fat12(HANDLE hDrv, const BPBCORE *bpb, const void *bootsect)
 	}
 
 	if (SetFilePointer(hDrv, 0, NULL, FILE_BEGIN) == 0 && WriteFile(hDrv, buf, bufsize_total, &dwWritten, NULL)) {
+		FlushFileBuffers(hDrv);
 		dwRC = 0;
 	} else{
 		dwRC = GetLastError();
