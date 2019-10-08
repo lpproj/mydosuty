@@ -471,6 +471,16 @@ DWORD write_fs_fat12(HANDLE hDrv, const BPBCORE *bpb, const void *bootsect)
 }
 
 
+static void print_formatting_parameter(const BPBCORE *bpb)
+{
+	fprintf(stderr, "Formatting %uKiB (%u sectors, %u head(s), %u cylinders, %u bytes/sct)\n"
+	              , (unsigned)((bpb->sectors * bpb->bytes_per_sector)/1024U)
+	              , bpb->sectors_per_head
+	              , bpb->heads_per_track
+	              , bpb->sectors / (bpb->sectors_per_head * bpb->heads_per_track)
+	              , bpb->bytes_per_sector
+	       );
+}
 
 DWORD format_fd_bpb(int drive0, const BPBCORE *bpb, int do_verify, int buildfs, int do_prompt)
 {
@@ -504,7 +514,7 @@ DWORD format_fd_bpb(int drive0, const BPBCORE *bpb, int do_verify, int buildfs, 
 		}
 	}
 
-	fprintf(stderr, "Formatting %uKiB (%u sectors, %u head(s), %u cylinders, %u bytes/sct)\n", (unsigned)((bpb->sectors * bpb->bytes_per_sector)/1024U), bpb->sectors_per_head, bpb->heads_per_track, bpb->sectors / (bpb->sectors_per_head * bpb->heads_per_track), bpb->bytes_per_sector);
+	print_formatting_parameter(bpb);
 
 	// at 1st, format track 0 with new mediaType
 	// then, remount the medium 
