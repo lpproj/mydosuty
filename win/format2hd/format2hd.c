@@ -40,9 +40,16 @@
 #endif
 
 #define ALLOW_FAKE640 1
+# define ALLOW_FAKE640TEST 1
 /* #define ALLOW_DMF 1 */
 /* #define EJECT_AFTER_FORMAT 1 */
 /* #define BE_SENSITIVE_ABOUT_UPDAING_BPB 0 */
+
+enum {
+	NO_FAKE640 = 0,
+	FAKE640,
+	FAKE640_TEST
+};
 
 const unsigned char bootsect_dummy[512] = {
 #include "bootdumy.h"
@@ -149,7 +156,7 @@ DWORD DevIo_WithErr(HANDLE hDev, DWORD dwCode, LPVOID in, DWORD cb_in, LPVOID ou
 	DWORD tick_start = GetTickCount();
 
 	if (dwCode == IOCTL_DISK_FORMAT_TRACKS || dwCode == IOCTL_DISK_FORMAT_TRACKS_EX)
-		timeout_ms = 30000;
+		timeout_ms = 15000;
 
 	do {
 		DWORD tick, difftick;
@@ -171,7 +178,6 @@ DWORD DevIo_NoParam(HANDLE hDev, DWORD dwCode)
 {
 	return DevIo_WithErr(hDev, dwCode, NULL, 0, NULL, 0, NULL, NULL);
 }
-
 
 BOOL isDiskWriteProtected(HANDLE hDrive)
 {
@@ -320,7 +326,7 @@ BOOL is_drive_fdd(int drive0, BOOL *is_5inch)
 	DWORD dwRC, dwlen;
 	BOOL rc = FALSE;
 	BOOL b5inch = FALSE;
-	int try_count = 1;
+	int try_count = 3;
 
 	hDrive = open_drive_a(drive0, 0);
 	if (hDrive == INVALID_HANDLE_VALUE) return FALSE;
@@ -436,7 +442,7 @@ void make_bootsector(void *buffer, const BPBCORE *bpb, const void *bootsect)
 }
 
 
-DWORD write_fs_fat12(HANDLE hDrv, const BPBCORE *bpb, const void *bootsect, unsigned physical_sectors_per_head)
+DWORD write_fs_fat12(HANDLE hDrv, const BPBCORE *bpb, const void *bootsect, unsigned physical_sectors_per_head, int build_fake640_testdisk)
 {
 	DWORD dwRC;
 	DWORD dwWritten;
@@ -455,8 +461,9 @@ DWORD write_fs_fat12(HANDLE hDrv, const BPBCORE *bpb, const void *bootsect, unsi
 	lba_total = (lba_total / bpb->sectors_per_head) * physical_sectors_per_head + (lba_total % bpb->sectors_per_head);
 
 	bufsize_total = lba_total * sb;
-	// workaround for reformatting 2HD(1024b/sct) disk to 1.44or2HC(512b/sct)
-	// bufsize_total = (bufsize_total + 1023) & (~1023UL);
+	if (build_fake640_testdisk) {
+		bufsize_total += sb * 3;
+	}
 
 	buf = VirtualAlloc(0, bufsize_total, MEM_COMMIT, PAGE_READWRITE);
 	if (!buf) return GetLastError();
@@ -472,6 +479,33 @@ DWORD write_fs_fat12(HANDLE hDrv, const BPBCORE *bpb, const void *bootsect, unsi
 		unsigned char *fatp = buf + lbafat_phys * sb;
 		fatp[0] = bpb->media_descriptor;
 		fatp[1] = fatp[2] = 0xff;
+		if (build_fake640_testdisk) {
+			fatp[3] = 0xff;
+			fatp[4] = 0x0f;
+		}
+	}
+
+	if (build_fake640_testdisk) {
+		const static unsigned char check_dirent[] = {
+			'C', 'H', 'E', 'C', 'K', '6', '4', '0', 'T', 'X', 'T',  // 00-0A filename + ext
+			0x20,                                                   // 0B attr
+			0,                                                      // 0C flag (vfat)
+			0, 0, 0,                                                // 0D-0F ctime (vfat)
+			0, 0,                                                   // 10-11 cdate (vfat)
+			0, 0,                                                   // 12-13 atime (vfat)
+			0, 0,                                                   // 14-15 clusterHi (fat32)
+			0, 0,                                                   // 16-17 mtime
+			(1 << 5) | 1, 0,                                        // 18-19 mdate
+			2, 0,                                                   // 1A-1B clusterLo
+			8, 0, 0, 0                                              // 1C-1F filelength
+		};
+		const char ok640[] = "OK, 640K";
+		const char no720[] = "NO, 720K";
+		unsigned long lbadir = bpb->reserved_sectors + (bpb->sectors_per_fat * bpb->fats);
+		unsigned char *pdir = buf + lbadir * sb;
+		memcpy(pdir, check_dirent, sizeof(check_dirent));
+		strcpy(buf + (lba_total + 1) * sb, ok640);
+		strcpy(buf + (lba_total + 0) * sb, no720);
 	}
 
 	if (SetFilePointer(hDrv, 0, NULL, FILE_BEGIN) == 0 && WriteFile(hDrv, buf, bufsize_total, &dwWritten, NULL)) {
@@ -519,15 +553,15 @@ DWORD format_fd_bpb(int drive0, const BPBCORE *bpb0, int do_verify, int buildfs,
 	mediaType = MediaTypeFromBPB(bpb, 0);
 	if (!mediaType) return ERROR_INVALID_DRIVE;
 #if ALLOW_FAKE640
-	if ((mediaType == F5_640_512 || mediaType == F3_640_512) && buildfs && fake640) {
+	if ((mediaType == F5_640_512 || mediaType == F3_640_512) && buildfs && fake640 != NO_FAKE640) {
 		bpb = &bpb_720;
 		mediaType = (mediaType == F5_640_512) ? F5_720_512 : F3_720_512;
-		physical_sectors_per_head = bpb->sectors_per_head;
+		physical_sectors_per_head = fake640 == FAKE640 ? bpb->sectors_per_head : 0;
 	}
 	else
 #endif
 	{
-		fake640 = 0;
+		fake640 = NO_FAKE640;
 	}
 
 	if (do_prompt) {
@@ -591,9 +625,13 @@ DWORD format_fd_bpb(int drive0, const BPBCORE *bpb0, int do_verify, int buildfs,
 	SetFilePointer(hDrive, 0, NULL, FILE_BEGIN);
 	if (dwRC == 0 && buildfs) {
 		if (do_msg) {
-			fprintf(stderr, "Building FAT12 filesystem%s...", fake640 ? " (fake640)" : "");
+			fprintf(stderr, "Building FAT12 filesystem");
+			if (fake640 != NO_FAKE640) {
+				fprintf(stderr, " (fake640%s)", fake640 == FAKE640_TEST ? " testdisk" : "");
+			}
+			fprintf(stderr, "...");
 		}
-		dwRC = write_fs_fat12(hDrive, bpb0, bootsect_dummy, physical_sectors_per_head);
+		dwRC = write_fs_fat12(hDrive, bpb0, bootsect_dummy, physical_sectors_per_head, fake640 == FAKE640_TEST);
 		if (do_msg) {
 			fprintf(stderr, "%s\n", dwRC ? "failure" : "ok");
 		}
@@ -623,7 +661,7 @@ static int optU;
 static int optRaw;
 static int optVerify;
 static int optNoPrompt;
-static int optFake640;
+static int optFake640 = NO_FAKE640;
 int drivenum0 = -1;
 
 static int cmpoptf(const char *s1, const char *s2)
@@ -669,7 +707,11 @@ int mygetopt(int argc, char *argv[])
 					if (s[1] == ':' || s[1] == '=') {
 						s += 2;
 #if ALLOW_FAKE640
-						if (eqf(s, "640f") || eqf(s, "fake640")) { opt_bpb = &bpb_640; optFake640 = 1; }
+# if ALLOW_FAKE640TEST
+						if (eqf(s, "fake640t")) { opt_bpb = &bpb_640; optFake640 = FAKE640_TEST; }
+						else
+# endif
+						if (eqf(s, "640f") || eqf(s, "fake640")) { opt_bpb = &bpb_640; optFake640 = FAKE640; }
 						else
 #endif
 						if (eqf(s, "640") && !eqf(s, "640f")) opt_bpb = &bpb_640;
@@ -717,7 +759,10 @@ void put_usage(void)
 		"     DMF   1.68M Microsoft DMF (21sectors, 80cylinders, 512bytes per sector)\n"
 #endif
 #if ALLOW_FAKE640
-		"     fake640   format with 720K, and build FAT as 640K disk\n"
+		"     fake640       format with 720K, and build FAT as 640K disk\n"
+# if ALLOW_FAKE640TEST
+		"     fake640test   format with 720K, and build 640K test disk for the drive\n"
+# endif
 #endif
 		"\n"
 		"  /RAW     format only (do not build FAT filesystem after format)\n"
