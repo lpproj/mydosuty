@@ -41,7 +41,7 @@
 
 #define ALLOW_FAKE640 1
 # define ALLOW_FAKE640TEST 1
-/* #define ALLOW_DMF 1 */
+#define ALLOW_DMF 1
 /* #define EJECT_AFTER_FORMAT 1 */
 /* #define BE_SENSITIVE_ABOUT_UPDAING_BPB 0 */
 
@@ -123,6 +123,10 @@ struct ERRNAME {
 	{ ERROR_INVALID_PARAMETER, "Invalid Parameter" },
 	
 	{ ERROR_IO_DEVICE, "Device I/O Error" },
+	{ ERROR_FLOPPY_ID_MARK_NOT_FOUND, "Floppy ID Mark Not Found" },
+	{ ERROR_FLOPPY_WRONG_CYLINDER, "Floppy Wrong Cylinder" },
+	{ ERROR_FLOPPY_UNKNOWN_ERROR, "Floppy Unknown Error" },
+
 	{ ERROR_MEDIA_CHANGED, "Media Changed" },
 	{ ERROR_UNRECOGNIZED_MEDIA, "Wrong (unrecognized) Media"},
 	{ 0, NULL }
@@ -237,19 +241,24 @@ DWORD format_track(HANDLE hDrive, MEDIA_TYPE mediaType, DWORD cylinder, DWORD he
 	
 	if (mediaType == F3_1Pt44_512 && sector != 0 && sector > 18) {
 		WORD n;
+		WORD secnum;
 		BYTE expbuf[sizeof(FORMAT_EX_PARAMETERS) + sizeof(WORD)*255];
 		DWORD expbufsiz;
 		FORMAT_EX_PARAMETERS *exfm;
 
 		exfm = (void *)expbuf;
-		expbufsiz = offsetof(FORMAT_EX_PARAMETERS, SectorNumber[sector]);
+		expbufsiz = sizeof(FORMAT_EX_PARAMETERS) - sizeof(exfm->SectorNumber) + (sizeof(exfm->SectorNumber[0]) * sector);
 		ZeroMemory(exfm, sizeof(expbuf));
 		exfm->MediaType = mediaType;
 		exfm->StartCylinderNumber = exfm->EndCylinderNumber = cylinder;
 		exfm->StartHeadNumber = exfm->EndHeadNumber = head;
 		exfm->SectorsPerTrack = sector;
-		for(n=0; n<sector; ++n) {
-			exfm->SectorNumber[n] = n + 1;
+		secnum = 0;
+		for(n=0; n<sector; n+=2, ++secnum) {
+			exfm->SectorNumber[n] = secnum + 1;
+		}
+		for(n=1; n<sector; n+=2, ++secnum) {
+			exfm->SectorNumber[n] = secnum + 1;
 		}
 		exfm->FormatGapLength = (sector > 18) ? 0x0c : 108;	/* 1440 = 0x1b 1680 = 0x0c */
 		dwRC = DevIo_WithErr(hDrive, IOCTL_DISK_FORMAT_TRACKS_EX, exfm, expbufsiz, NULL, 0, NULL, NULL);
@@ -436,6 +445,11 @@ void make_bootsector(void *buffer, const BPBCORE *bpb, const void *bootsect)
 		CopyMemory(buf + 43, "NO NAME    ", 11);
 		CopyMemory(buf + 54, "FAT12   ", 8);
 	}
+#if ALLOW_DMF
+	if (bpb->sectors == 21*2*80) {
+		CopyMemory(buf + 3, "MSDMF3.2", 8); /* guess that it might not be required. just to be safe... */
+	}
+#endif
 
 	buf[510] = 0x55;
 	buf[511] = 0xaa;
