@@ -1,0 +1,31 @@
+# makefile for (open)watcom
+#
+# wmake -h -f Makefile.wc
+
+CP=cp
+RM=rm
+
+CC=wcl
+CFLAGS=-zq -s -Fr -zp1 -ms -bt=dos
+LDFLAGS=-ldos
+
+HDRS=dumpmem.h helper.h
+
+
+all: bpbdpb.exe dskrd.exe
+
+clean: .SYMBOLIC
+	-$(RM) bpbdpb.exe dskrd.exe
+	-$(RM) *.obj *.err
+
+
+bpbdpb.exe: bpbdpb.c $(HDRS)
+	$(CC) $(CFLAGS) -Fe=$^@ $[@  $(LDFLAGS)
+
+dskrd.exe: dskrd.c dskrd_h.obj $(HDRS)
+	$(CC) $(CFLAGS) -Fe=$^@ $[@ dskrd_h.obj  $(LDFLAGS)
+
+dskrd_h.obj: dskrd_h.asm
+	nasm -f obj -o $^@ $[@
+
+

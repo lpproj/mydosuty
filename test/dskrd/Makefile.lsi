@@ -1,0 +1,33 @@
+# makefile for LSI-C86 3.30c (trial)
+#
+# make -f Makefile.lsi
+
+CP=copy
+RM=del
+
+CC=lcc
+CFLAGS=
+LIBS=-lintlib
+LDFLAGS=
+
+HDRS=dumpmem.h helper.h
+
+
+all: bpbdpb.exe dskrd.exe
+
+clean:
+	-$(RM) bpbdpb.exe
+	-$(RM) dskrd.exe
+	-$(RM) *.obj
+
+
+bpbdpb.exe: bpbdpb.c $(HDRS)
+	$(CC) $(CFLAGS) -o $@ $<  $(LIBS) $(LDFLAGS)
+
+dskrd.exe: dskrd.c dskrd_h.obj $(HDRS)
+	$(CC) $(CFLAGS) -o $@ $< dskrd_h.obj $(LIBS) $(LDFLAGS)
+
+dskrd_h.obj: dskrd_h.asm
+	nasm -f obj -o $@ -DLSI_C $<
+
+
