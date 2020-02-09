@@ -67,7 +67,7 @@ For more information, please refer to <http://unlicense.org/>
 
 
 int DCh CL=12h
-(20200207: tested on NEC MS-DOS 6.2)
+(20200207~0209: tested on NEC MS-DOS 6.2)
  0000:0500 word |0481|0487|0458|result 
   b13 12 11   0 | b6 |byte| b7 |  DX   | description
  ---------------+----+----+----+-------+----------------------
@@ -77,8 +77,9 @@ int DCh CL=12h
     1  0  0   1 |  0 |    |  0 | 0003h | PC-98x1 normal (old key mode?)
     1  0  0   1 |  1 |    |  0 | 0004h | PC-98x1 normal (new key mode?) [*1]
     0  0  1   0 |  0 |    |  0 | 0100h | PC-98XA
-    0  0  1   0 |  1 |    |  0 | 0101h | PC-98 hi-res? [*2]
+    0  0  1   0 |  1 |    |  0 | 0101h | PC-98XA? [*2]
     1  0  1   0 |    |    |  0 | 0101h | PC-98 hi-res (except PC-H98, PC-98XA)
+          1     |    |    |  0 |(0101h)| (PC-98 hi-res)
           0     |    |!04 |  1 | 1004h | PC-H98 normal (other than i486)
           0     |    | 04 |  1 | 1005h | PC-H98 normal (i486) [*3]
           1     |    |!04 |  1 | 1101h | PC-H98 hi-res (other than i486)
