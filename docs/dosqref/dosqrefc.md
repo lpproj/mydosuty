@@ -11,7 +11,7 @@ int 21h DOSファンクションコール一覧
 
 - int 21h AH=00h プログラム終了(COMプログラム用) rbint:[D-2100](http://www.delorie.com/djgpp/doc/rbinter/id/62/25.html)
 - int 21h AH=01h 標準入力から１文字入力（エコー付） rbint:[D-2101](http://www.delorie.com/djgpp/doc/rbinter/id/63/25.html)
-- int 21h AH=02h 標準出力に１文字出力 rbint:[D-2102](http://www.delorie.com/djgpp/doc/rbinter/ix/21/02.html)
+- int 21h AH=02h 標準出力に１文字出力 rbint:[D-2102](http://www.delorie.com/djgpp/doc/rbinter/id/65/25.html)
 - int 21h AH=03h 標準補助入力(AUX)から１文字入力 rbint:[D-2103](http://www.delorie.com/djgpp/doc/rbinter/id/66/25.html)
 - int 21h AH=04h 標準補助出力(AUX)に１文字出力 rbint:[D-2104](http://www.delorie.com/djgpp/doc/rbinter/id/67/25.html)
 - int 21h AH=05h プリンタ(PRN)に１文字出力 rbint:[D-2105](http://www.delorie.com/djgpp/doc/rbinter/id/68/25.html)
@@ -233,11 +233,11 @@ int 21h以外のDOS機能・コールバックハンドラ
 ------------------------------
 
 要はハンドル 0（標準入力）、1（標準出力）、3（標準補助出力）、4（プリンタ）への入出力。  
-CONデバイスがCOOKEDモード（デフォルト）の場合、CONデバイスに対するファンクション3Fhの読み込みは行入力モードとなる。行入力したくない場合はファンクション4401hを使って標準入力をRAWモードに設定するか、4401hや0Ah以外の入力ファンクションを使う。
+CONデバイスがCOOKEDモード（デフォルト）の場合、CONデバイスに対するファンクション3Fhの読み込みは行入力モードとなる。行入力したくない場合はファンクション4401hを使って標準入力をRAW(BINARY)モードに設定するか、4401hや0Ah以外の入力ファンクションを使う。
 int 29hはコンソールドライバ内部の文字表示ルーチンを直接呼び出すため。DOSによるリダイレクトの影響を受けない。
 
 - int 21h AH=01h 標準入力から１文字入力（エコー付） rbint:[D-2101](http://www.delorie.com/djgpp/doc/rbinter/id/63/25.html)
-- int 21h AH=02h 標準出力に１文字出力 rbint:[D-2102](http://www.delorie.com/djgpp/doc/rbinter/ix/21/02.html)
+- int 21h AH=02h 標準出力に１文字出力 rbint:[D-2102](http://www.delorie.com/djgpp/doc/rbinter/id/65/25.html)
 - int 21h AH=03h 標準補助入力(AUX)から１文字入力 rbint:[D-2103](http://www.delorie.com/djgpp/doc/rbinter/id/66/25.html)
 - int 21h AH=04h 標準補助出力(AUX)に１文字出力 rbint:[D-2104](http://www.delorie.com/djgpp/doc/rbinter/id/67/25.html)
 - int 21h AH=05h プリンタ(PRN)に１文字出力 rbint:[D-2105](http://www.delorie.com/djgpp/doc/rbinter/id/68/25.html)
