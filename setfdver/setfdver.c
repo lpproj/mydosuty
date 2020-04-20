@@ -101,12 +101,12 @@ void query_and_disp_dosver(int disp)
 
     if (disp) {
         char *s;
-        printf("DOS Version      %d.%d", v_maj, v_min);
+        printf("DOS Version      %d.%02d", v_maj, v_min);
         if (v_maj == 10) printf(" (OS/2 1.x)");
         else if (v_maj == 20) printf(" (OS/2 2.x or later)");
         printf("\n");
         if (true_maj) {
-            printf("True Version     %d.%d", true_maj, true_min);
+            printf("True Version     %d.%02d", true_maj, true_min);
             if (true_maj == 5 && true_min == 50) printf(" (NTVDM)");
             printf("\n");
         }
@@ -306,7 +306,7 @@ int main(int argc, char *argv[])
         r.h.bh = opt_min;
         intdos(&r, &r);
         if (!optQ) {
-            printf("set DOS version to %d.%d\n", opt_maj, opt_min);
+            printf("set DOS version to %d.%02d\n", opt_maj, opt_min);
         }
     }
 
