@@ -1,6 +1,12 @@
 /*
 setfdver: Fake FreeDOS kernel version (like VERSION directive in CONFIG.SYS)
 
+to build
+  with OpenWatcom:  wcl -zq -Fr -s -bt=dos setfdver.exe -l=dos
+  with Turbo C++:   tcc setfdver.c
+  with LSI-C86:     lcc setfdver.c -lintlib -ltinymain.obj
+  with gcc-ia16:    ia16-elf-gcc -s -Os -o setfdver.exe setfdver.c -li86
+
 
 This is free and unencumbered software released into the public domain.
 
@@ -35,6 +41,10 @@ For more information, please refer to <http://unlicense.org/>
 #include <stdlib.h>
 #include <string.h>
 
+#if defined __GNUC__
+/* ia16-elf-gcc */
+# define far __far
+#endif
 
 /* version information of various DOS */
 
@@ -52,7 +62,6 @@ static const char far *s_fdkernel;
 
 void query_and_disp_dosver(int disp)
 {
-    unsigned uh;
     r.x.ax = 0x3306;
     r.x.bx = 0;
     r.x.dx = 0xffff;
