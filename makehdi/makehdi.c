@@ -650,6 +650,34 @@ int my_getopt(int argc, char **argv)
                 else if (my_strcasecmp(optarg, "nhd")==0) optF = DISK_NHD;
                 else if (my_strcasecmp(optarg, "v98")==0) optF = DISK_V98;
                 else if (my_strcasecmp(optarg, "hdd")==0) optF = DISK_V98;
+                else if (my_strcasecmp(optarg, "mo128")==0) {
+                    optF = DISK_RAW;
+                    optC = 9953;
+                    optH = 1;
+                    optS = 25;
+                    optB = 512;
+                }
+                else if (my_strcasecmp(optarg, "mo230")==0) {
+                    optF = DISK_RAW;
+                    optC = 17853;
+                    optH = 1;
+                    optS = 25;
+                    optB = 512;
+                }
+                else if (my_strcasecmp(optarg, "mo540")==0) {
+                    optF = DISK_RAW;
+                    optC = 41660;
+                    optH = 1;
+                    optS = 25;
+                    optB = 512;
+                }
+                else if (my_strcasecmp(optarg, "mo640")==0) {
+                    optF = DISK_RAW;
+                    optC = 18256;
+                    optH = 1;
+                    optS = 17;
+                    optB = 2048;
+                }
                 else {
                     fprintf(stderr, "Invalid disk format\n");
                     return -1;
@@ -673,10 +701,14 @@ void usage(void)
 {
     const char msg[] = 
         "usage : makehdi [-f disk_type] [--size disk_size] [-c cylinders] [-h heads] [-s sectors_per_track] [-b bytes_per_sector] imagefile\n"
-        "disk_type : hdi  Anex86    (*.hdi)\n"
-        "            nhd  T98Next   (*.nhd)\n"
-        "            v98  Virtual98 (*.hdd)\n"
-        "            raw  raw (flat) image\n"
+        "disk_type : hdi    Anex86    (*.hdi)\n"
+        "            nhd    T98Next   (*.nhd)\n"
+        "            v98    Virtual98 (*.hdd)\n"
+        "            raw    raw (flat) image\n"
+        "            mo128  raw image for optical disk\n"
+        "            mo230\n"
+        "            mo540\n"
+        "            mo640\n"
         ;
     printf("%s", msg);
 }
