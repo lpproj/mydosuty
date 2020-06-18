@@ -9,7 +9,7 @@ CHS情報がマニュアル指定できる点と（NTFSディスク上であれ�
 書法
 ----
 
-ディスクイメージの作成方法は主に３通りあります。
+ディスクイメージの作成方法は主に４通りあります。
 
 1. ディスク容量のみの指定
 > makehdi [-f *disk_type*] [-b *bytes_per_sector*] --size *disk_size* IMAGEFILE
@@ -17,6 +17,8 @@ CHS情報がマニュアル指定できる点と（NTFSディスク上であれ�
 > makehdi [-f *disk_type*] [-b *bytes_per_sector*] -h *heads* -s *sectors* --size *disk_size* IMAGEFILE
 3. シリンダ数、ヘッド数、トラック当たりのセクタ数を指定。ディスク容量は自動算出。 
 > makehdi [-f *disk_type*] [-b *bytes_per_sector*] -c *cylinders* -h *heads* -s *sectors* IMAGEFILE
+4. ディスクイメージの種類のみ指定。ディスク容量はイメージ種類ごとに固定。MOイメージのみ対応。
+> makehdi -f *disk_type* IMAGEFILE
 
 
 説明
@@ -33,12 +35,16 @@ CHS情報がマニュアル指定できる点と（NTFSディスク上であれ�
 | nhd         | NHD形式（T98Next） | .nhd             |
 | v98         | Virtual98形式      | .hdd             |
 | raw         | ベタイメージ       |                  |
+| mo128       | 128M MOイメージ    |                  |
+| mo230       | 230M MOイメージ    |                  |
+| mo540       | 540M MOイメージ    |                  |
+| mo640       | 640M MOイメージ    |                  |
 
 
  -b *bytes_per_sector*
 
 １セクタ当たりのバイト数。256, 512, 1024, 2048 が指定可能。     
-オプション無指定時は 512。
+オプション無指定時は 512（*disk_type* がmo640の場合は2048）。
 
 
  --size *disk_size*
