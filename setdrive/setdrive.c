@@ -49,21 +49,41 @@ For more information, please refer to <http://unlicense.org/>
 #endif
 
 char far *
+get_master_environ(void)
+{
+    union REGS r;
+    struct SREGS sr;
+    unsigned short shell_psp, env_seg;
+    r.x.ax = 0x352e;
+    intdosx(&r, &r, &sr);
+    shell_psp = sr.es;
+    env_seg = *(unsigned short far *)MK_FP(shell_psp, 0x2c);
+    if (env_seg <= 8 || env_seg == 0xffff) {
+        unsigned char far *m = MK_FP(shell_psp - 1, 0);
+        if (*m != 'M' || *(unsigned short far *)(m + 1) != shell_psp)
+            return 0L;
+        env_seg = shell_psp + *(unsigned short far *)(m + 3);
+        m = MK_FP(env_seg, 0);
+        if ((*m != 'M' && *m != 'Z') || *(unsigned short far *)(m + 1) != shell_psp)
+            return 0L;
+        ++env_seg;
+    }
+    return MK_FP(env_seg, 0);
+}
+
+char far *
 get_parent_environ(void)
 {
     union REGS r;
-    char far *p = 0L;
-    unsigned short parent_seg;
+    char far *p;
+    unsigned short parent_seg, env_seg;
     
     r.h.ah = 0x51;  /* or 0x62 */
     intdos(&r, &r);
     parent_seg = *(unsigned short far *)MK_FP(r.x.bx, 0x16);
-    if (parent_seg > 8 && parent_seg != 0xffffU) {
-        unsigned short env_seg = *(unsigned short far *)MK_FP(parent_seg, 0x2c);
-        if (env_seg > 8 && env_seg != 0xffffU) {
-            p = MK_FP(env_seg, 0);
-        }
-    }
+    if (parent_seg > 8 && parent_seg != 0xffffU)
+        env_seg = *(unsigned short far *)MK_FP(parent_seg, 0x2c);
+    p = (env_seg > 8 && env_seg != 0xffffU) ? MK_FP(env_seg, 0) : get_master_environ();
     return p;
 }
 
