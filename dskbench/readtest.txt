@@ -56,6 +56,6 @@ Drive:‚Ì•”•ª‚É‚ÍDOS‚Ìƒhƒ‰ƒCƒu•¶šiA:‚©‚çZ:‚Ü‚Åj‚ğw’è‚µ‚Ü‚·Bw’è‰Â”\‚Èƒhƒ‰ƒCƒ
 
 –{ƒ\ƒtƒgƒEƒFƒA‚Í–³•ÛØ‚Å‚·BŠe©‚ÌÓ”C‚É‚¨‚¢‚Ä‚²—˜—p‚­‚¾‚³‚¢B
 
-https://github.com/lpproj/mydosuty/dskbench/readtest.c
+https://github.com/lpproj/mydosuty/blob/master/dskbench/readtest.c
 
 Œ»óAOpenWatcom C/C++ 1.9 ‚à‚µ‚­‚Í 2.0beta ‚Å‚Ì‚İƒRƒ“ƒpƒCƒ‹‰Â”\‚Å‚·B
