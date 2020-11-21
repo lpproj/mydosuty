@@ -1,0 +1,37 @@
+SPTIINFO (ASPIINFO)
+===================
+
+Windows上のドライブにSCSI相当のコマンドをいくつか発行し、取得したデータを表示します。
+16ビットMS-DOS互換環境ではASPIドライバを経由して情報を取得します。
+
+本プログラムは無保証です。各自の責任においてご利用ください。
+
+
+用法（Win32）
+-------------
+
+  SPTIINFO drive_letter:
+
+    drive_letter  指定されたドライブの情報を表示。
+                  指定可能なドライブ文字は、A～ZまでのATA(ATAPI)、SCSI、USB
+                  などで接続されたドライブ。
+
+
+用法（DOS）
+-----------
+
+  SPTIINFO [-A adapter_id] -I device_id [-L lun]
+
+    adapter_id    SCSIインターフェース（ASPIドライバ）のアダプタ番号
+                  （-Aオプション省略時は "-A 0" と同じ）
+    device_id     情報を読み取りたいデバイスのID（0～6）
+    lun           デバイスの論理ユニット番号
+                  （-Lオプション省略時は "-L 0" と同じ）
+
+
+ソース
+------
+
+https://github.com/lpproj/mydosuty/blob/master/win/sptitest/ (sptiinfo.c)
+
+ビルド手順はソース中のコメントやMakefile.wcを参照してください。
