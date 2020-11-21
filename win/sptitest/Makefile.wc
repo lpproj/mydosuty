@@ -1,0 +1,23 @@
+# openwatcom wmake: wmake -h -f Makefile.wc
+
+.ERASE
+
+RM=rm -f
+UPX=upx
+#UPX=@echo noupx
+
+
+all: sptiinfo.exe
+
+clean: .SYMBOLIC
+	-$(RM) aspiinfo.exe
+	-$(RM) sptiinfo.exe
+	-$(RM) *.obj *.err
+
+sptiinfo.exe: sptiinfo.c aspiinfo.exe
+	wcl386 -zq -s -fr -onetx -fe=$@ $[@ -bcl=nt -"op stub=aspiinfo.exe"
+
+aspiinfo.exe: sptiinfo.c
+	wcl -zq -s -fr -os -zp1 -ml -k4096 -fe=$@ $[@ -bcl=dos
+	$(UPX) -9 --8086 $@
+
