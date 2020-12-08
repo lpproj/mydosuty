@@ -1,8 +1,11 @@
 /*
     makehdi: build a disk image file for PC-98 emulator (Anex86/T98Next/NP2)
 
-    to build (with gcc):
-    gcc -Wall -O2 -s -o makehd makehd.c
+    to build with gcc:
+    gcc -Wall -O2 -s -o makehdi makehdi.c
+
+    with OpenWatcom:
+    wcl386 -zq -s -Fr -za99 -DUSE_YA_GETOPT makehdi.c
 
 This is free and unencumbered software released into the public domain.
 
@@ -30,6 +33,8 @@ OTHER DEALINGS IN THE SOFTWARE.
 For more information, please refer to <http://unlicense.org/>
 
 */
+
+#define RELEASE_DATE_STRING "20201208"
 
 #if defined WIN32 || defined _WIN32
 # undef WINVER
@@ -651,10 +656,12 @@ int my_getopt(int argc, char **argv)
                 else if (my_strcasecmp(optarg, "v98")==0) optF = DISK_V98;
                 else if (my_strcasecmp(optarg, "hdd")==0) optF = DISK_V98;
                 else if (my_strcasecmp(optarg, "mo128")==0) {
+                    /* 128MB MO: 9994cyliders * 25sectors - defect_sectors(1024) = 248826 (127398912bytes) */
+                    /* workaround: 248826 = 2 * 3 * 113 * 367 */
                     optF = DISK_RAW;
-                    optC = 9953;
+                    optC = 367 * 2 * 3;
                     optH = 1;
-                    optS = 25;
+                    optS = 113;
                     optB = 512;
                 }
                 else if (my_strcasecmp(optarg, "mo230")==0) {
@@ -700,6 +707,7 @@ int my_fextcmp(const char *fname, const char *ext)
 void usage(void)
 {
     const char msg[] = 
+        "MAKEHDI - make a blank HDI or other disk image (release " RELEASE_DATE_STRING ")\n"
         "usage : makehdi [-f disk_type] [--size disk_size] [-c cylinders] [-h heads] [-s sectors_per_track] [-b bytes_per_sector] imagefile\n"
         "disk_type : hdi    Anex86    (*.hdi)\n"
         "            nhd    T98Next   (*.nhd)\n"
