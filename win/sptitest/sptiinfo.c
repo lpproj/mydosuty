@@ -114,7 +114,7 @@ typedef struct SCSICMDPKT {
 } SCSICMDPKT;
 
 #if UINT_MAX <= 0xffffU
-unsigned transfer_buf_max = 4096;
+unsigned transfer_buf_max = 2048;
 #else
 unsigned transfer_buf_max = SCSI_TRANSFER_DATA_MAX;
 #endif
@@ -669,13 +669,17 @@ int scsidrvinfo(SCSIDRV *drv, FILE *fo)
     sc.cdb_length = 10;
     sc.cdb[0] = 0x25; /* READ CAPACITY(10) */
     rc = scsi_readdump_extbuf(drv, &sc, buffer, 8, fo);
-    if (rc == 8 /* && (buffer[0] & buffer[1] & buffer[2] & buffer[3]) == 0xff */) {
-        fprintf(fo, "[READ CAPACITY(16)]\n");   /* SCSI3 SBC-2 */
-        sc = sc_null;
-        sc.cdb_length = 16;
-        sc.cdb[0] = 0x9e; /* READ CAPACITY(16) */
-        sc.cdb[1] = 0x10; /* service action */
-        rc = scsi_readdump_extbuf(drv, &sc, buffer, 32, fo);
+    if (rc == 8) {
+        U32 lastlba = (U32)(buffer[3]) | ((U32)(buffer[2]) << 8) | ((U32)(buffer[1]) << 16) | ((U32)(buffer[0]) << 24);
+        U32 bpblk = (U32)(buffer[7]) | ((U32)(buffer[6]) << 8) | ((U32)(buffer[5]) << 16) | ((U32)(buffer[4]) << 24);
+        if ((U64)lastlba >= 0xffffffffUL || (U64)lastlba * bpblk >= (U64)0xffffffffUL * 512U) {
+            fprintf(fo, "[READ CAPACITY(16)]\n");   /* SCSI3 SBC-2 */
+            sc = sc_null;
+            sc.cdb_length = 16;
+            sc.cdb[0] = 0x9e; /* READ CAPACITY(16) */
+            sc.cdb[1] = 0x10; /* service action */
+            rc = scsi_readdump_extbuf(drv, &sc, buffer, 32, fo);
+        }
     }
 
     fprintf(fo, "[READ DEFECT DATA(10) format=7]\n");
