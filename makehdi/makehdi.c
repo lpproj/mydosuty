@@ -34,7 +34,7 @@ For more information, please refer to <http://unlicense.org/>
 
 */
 
-#define RELEASE_DATE_STRING "20201208"
+#define RELEASE_DATE_STRING "20201220"
 
 #if defined WIN32 || defined _WIN32
 # undef WINVER
@@ -352,6 +352,7 @@ U32 optB;
 U64 optSize;
 int optF = DISK_DEFAULT;
 int optHeader;
+int optOverwrite;
 char *prm_fname;
 
 
@@ -559,7 +560,12 @@ int buildHDImage(const char *filename, int do_overwrite)
     }
     fo = open(filename, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY | (do_overwrite ? 0 : O_EXCL), 0644);
     if (fo == -1) {
-        fprintf(stderr, "Can't open the file '%s'\n", filename);
+        if (errno == EEXIST && !do_overwrite) {
+            fprintf(stderr, "The file '%s' already exists\n", filename);
+        }
+        else {
+            fprintf(stderr, "Can't open the file '%s' (errno=%d)\n", filename, errno);
+        }
         return -1;
     }
     lseek(fo, 0L, SEEK_SET); /* to be safe... */
@@ -596,6 +602,8 @@ static struct option optlong_params[] = {
     { "help",   no_argument, 0, '?' },
     /* without short option */
     { "header-only", required_argument, 0, 0 },
+    { "force",   no_argument, 0, 0 },
+    { "overwrite",   no_argument, 0, 0 },
     /* with short option */
     { "quiet",   no_argument, 0, 'q' },
     { "verbose",   no_argument, 0, 'v' },
@@ -626,6 +634,9 @@ int my_getopt(int argc, char **argv)
             case 0:
                 switch (optlong_index) {
                     case 1: optHeader = 1; break; /* --header-only */
+                    case 2:
+                    case 3:
+                        optOverwrite = 1; break; /* --force, --overwrite */
                 }
                 break;
             case 'q': optQ = 1; break;
@@ -685,6 +696,13 @@ int my_getopt(int argc, char **argv)
                     optS = 17;
                     optB = 2048;
                 }
+                else if (my_strcasecmp(optarg, "mo650")==0 || my_strcasecmp(optarg, "mo5_650")==0) {
+                    optF = DISK_RAW;
+                    optC = 4656;
+                    optH = 1;
+                    optS = 64;
+                    optB = 1024;
+                }
                 else {
                     fprintf(stderr, "Invalid disk format\n");
                     return -1;
@@ -708,15 +726,17 @@ void usage(void)
 {
     const char msg[] = 
         "MAKEHDI - make a blank HDI or other disk image (release " RELEASE_DATE_STRING ")\n"
-        "usage : makehdi [-f disk_type] [--size disk_size] [-c cylinders] [-h heads] [-s sectors_per_track] [-b bytes_per_sector] imagefile\n"
+        "usage : makehdi [--overwrite] [-f disk_type] [--size disk_size] [-c cylinders] [-h heads] [-s sectors_per_track] [-b bytes_per_sector] imagefile\n"
         "disk_type : hdi    Anex86    (*.hdi)\n"
         "            nhd    T98Next   (*.nhd)\n"
         "            v98    Virtual98 (*.hdd)\n"
         "            raw    raw (flat) image\n"
-        "            mo128  raw image for optical disk\n"
-        "            mo230\n"
-        "            mo540\n"
-        "            mo640\n"
+        "            mo128  raw image for 3.5\" 128MB optical disk\n"
+        "            mo230  raw image for 3.5\" 230MB optical disk\n"
+        "            mo540  raw image for 3.5\" 540MB optical disk\n"
+        "            mo640  raw image for 3.5\" 640MB optical disk\n"
+        "            mo650  raw image for 5.25\" (130mm) 650MB optical disk\n"
+        "                   (300MB single sided image, 1024bytes per sector)\n"
         ;
     printf("%s", msg);
 }
@@ -739,7 +759,7 @@ int main(int argc, char **argv)
         else if (my_fextcmp(prm_fname, ".hdd")==0) optF = DISK_V98;
     }
     rc = checkHDParams();
-    if (rc == 0) rc = buildHDImage(prm_fname, 1);
+    if (rc == 0) rc = buildHDImage(prm_fname, optOverwrite);
 
     return rc;
 }
