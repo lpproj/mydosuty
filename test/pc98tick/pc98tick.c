@@ -124,14 +124,13 @@ void get98env(void)
     pit_rearm = is8MHz ? 19968 : 24576;
 }
 
-static void io_wait(void)
+void io_wait(void)
 {
-    if (hasWait5F || isPC98orgEFM) {
+    if (isPC98orgEFM) {
+        ++dummy_counter;
+    }
+    else
         outp(0x5f, 0);
-    }
-    else {
-        /* jmp short $*2 */
-    }
 }
 
 int hook_timer(void)
@@ -181,15 +180,6 @@ int unhook_timer(void)
     return 0;
 }
 
-void iowait(void)
-{
-    if (isPC98orgEFM) {
-        ++dummy_counter;
-    }
-    else
-        outp(0x5f, 0);
-}
-
 int peek_or_getkey(void)
 {
     r.x.ax = 0x0b00;
@@ -209,7 +199,7 @@ unsigned long get_ht24(void)
     unsigned long ht = *(unsigned long FAR *)MK_FP(0, 0x4f1) & 0x3fffffUL;
     if (ht < ht_prev) ++ht_days;
     ht_prev = ht;
-    return ht;
+    return ht + (24UL*60*60*32 * ht_days) ;
 }
 
 static unsigned long ar_prev24;
@@ -238,6 +228,7 @@ unsigned long get_artic32(void)
 int optA = 1;
 int optB;
 int optV;
+int optX;
 int optHelp;
 
 static int getnum(const char *s)
@@ -260,6 +251,7 @@ int my_getopt(int argc, char **argv)
                     break;
                 case 'A': case 'a': optA = getnum(s+2); break;
                 case 'B': case 'b': optB = getnum(s+2); break;
+                case 'X': case 'x': optX = getnum(s+2); break;
                 default:
                     break;
             }
@@ -276,6 +268,7 @@ void usage(void)
         "\n"
         "  -a-  do not disp unsupported timer ticks\n"
         "  -b   set PIT via timer BIOS (int 1Ch, ah=2)\n"
+        "  -x   disp raw counter value in hexdecimal\n"
         ;
     printf("%s", msg);
 }
@@ -310,11 +303,13 @@ int main(int argc, char **argv)
         if (hasHitimer || disp_all) {
             unsigned long ht = get_ht24() - ht_base;
             printf(" hitimer:%lu.%02u", (ht / 32U), ((ht % 32U) * 100U) / 32U);
+            if (optX) printf(" (0x%08lX)", ht);
         }
         if (hasARTIC || disp_all) {
             unsigned long ar = get_artic32() - ar_base32;
             unsigned long aru = ar % 307200UL;
-            printf(" ARTIC:%u.%06lu", (unsigned)(ar / 307200UL), (aru * 10000U) / 3072U);
+            printf(" ARTIC:%u.%06lu", (unsigned)(ar / 307200UL), (aru * 10000U) / 3072U, ar);
+            if (optX) printf(" (0x%08lX)", ar);
         }
         printf(" ");
         fflush(stdout);
