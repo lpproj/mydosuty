@@ -308,7 +308,7 @@ int main(int argc, char **argv)
         if (hasARTIC || disp_all) {
             unsigned long ar = get_artic32() - ar_base32;
             unsigned long aru = ar % 307200UL;
-            printf(" ARTIC:%u.%06lu", (unsigned)(ar / 307200UL), (aru * 10000U) / 3072U, ar);
+            printf(" ARTIC:%u.%06lu", (unsigned)(ar / 307200UL), (aru * 10000U) / 3072U);
             if (optX) printf(" (0x%08lX)", ar);
         }
         printf(" ");
