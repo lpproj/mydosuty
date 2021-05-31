@@ -72,3 +72,44 @@ rearm_pit_and_iret:
 	pop	ax
 	iret
 
+	global	_inpd_cdecl
+	global	inpd_lsic_
+;
+_inpd_cdecl:
+	push	bp
+	mov	bp, sp
+	mov	dx, [bp + 4]	; +0:bp, +2:ret(near), +4:param
+	pop	bp
+	; fallthrough
+	CPU	386
+inpd_386:
+	push	eax
+	pop	ax
+	in	eax, dx
+	push	eax
+	pop	ax
+	pop	dx
+	push	ax
+	pop	eax
+	ret
+;
+inpd_lsic_:
+	push	dx
+	xchg	ax, dx
+	call	inpd_386
+	mov	bx, dx
+	pop	dx
+	ret
+
+%if 0
+	CPU	8086
+inpd_86:
+	in	ax, dx
+	push	ax
+	add	dx, 2
+	in	ax, dx
+	xchg	ax, dx
+	pop	ax
+	ret
+%endif
+

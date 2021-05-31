@@ -81,6 +81,14 @@ extern unsigned long CDECL FAR timer_ticks;
 extern unsigned short CDECL FAR pit_rearm;
 extern unsigned char CDECL FAR do_chain;
 
+#ifdef LSI_C
+extern unsigned long inpd_lsic(unsigned);
+# define inpd(p) inpd_lsic(p)
+#else
+extern unsigned long CDECL inpd_cdecl(unsigned);
+# define inpd(p) inpd_cdecl(p)
+#endif
+
 static union REGS r;
 static struct SREGS sr;
 static int hasARTIC;
@@ -204,19 +212,24 @@ unsigned long get_ht24(void)
 
 static unsigned long ar_prev24;
 static unsigned ar_2432;
-unsigned long get_artic32(void)
+unsigned long get_artic32(int use_inpd)
 {
     unsigned long ar;
-    unsigned tl0, tl;
-    unsigned th;
 
-    my_disable();
-    tl0 = inpw(0x5c);
-    th = inpw(0x5e);
-    tl = inpw(0x5c);
-    if (tl < tl0) th = inpw(0x5e);
-    my_enable();
-    ar = ((unsigned long)(th & 0xff00U) << 8) | tl;
+    if (use_inpd) {
+        unsigned long t = inpd(0x5c);
+        ar = ((t & 0xff000000UL) >> 8) | (t & 0xffffUL);
+    }
+    else {
+        unsigned tl0, tl, th;
+        my_disable();
+        tl0 = inpw(0x5c);
+        th = inpw(0x5e);
+        tl = inpw(0x5c);
+        if (tl < tl0) th = inpw(0x5e);
+        my_enable();
+        ar = ((unsigned long)(th & 0xff00U) << 8) | tl;
+    }
     if (ar_prev24 > ar) ar_2432 += 0x0100;
     ar_prev24 = ar;
     return ar | ((unsigned long)ar_2432 << 16);
@@ -227,6 +240,7 @@ unsigned long get_artic32(void)
 
 int optA = 1;
 int optB;
+int optD;
 int optV;
 int optX;
 int optHelp;
@@ -251,6 +265,7 @@ int my_getopt(int argc, char **argv)
                     break;
                 case 'A': case 'a': optA = getnum(s+2); break;
                 case 'B': case 'b': optB = getnum(s+2); break;
+                case 'D': case 'd': optD = getnum(s+2); break;
                 case 'X': case 'x': optX = getnum(s+2); break;
                 default:
                     break;
@@ -264,10 +279,11 @@ static
 void usage(void)
 {
     const char msg[] =
-        "usage: pc98tick [-a-] [-b]"
+        "usage: pc98tick [-a-] [-b] [-d] [-x]"
         "\n"
         "  -a-  do not disp unsupported timer ticks\n"
         "  -b   set PIT via timer BIOS (int 1Ch, ah=2)\n"
+        "  -d   use 32bit I/O for ARTIC (386+)\n"
         "  -x   disp raw counter value in hexdecimal\n"
         ;
     printf("%s", msg);
@@ -277,6 +293,7 @@ int main(int argc, char **argv)
 {
     int disp_all;
     int init_pit_bios;
+    int use_inpd;
     unsigned long ht_base;
     unsigned long ar_base32;
 
@@ -288,6 +305,7 @@ int main(int argc, char **argv)
     }
     disp_all = optA;
     init_pit_bios = optB;
+    use_inpd = optD;
 
     printf("sysclk:%dMHz Wait5F:%d ARTIC:%d hitimer:%d\n", is8MHz ? 8:5, hasWait5F, hasARTIC, hasHitimer);
 
@@ -297,7 +315,7 @@ int main(int argc, char **argv)
     fflush(stdout);
     printf("\n");
     ht_base = (hasHitimer || disp_all) ? get_ht24() : 0;
-    ar_base32 = (hasARTIC || disp_all) ? get_artic32() : 0;
+    ar_base32 = (hasARTIC || disp_all) ? get_artic32(use_inpd) : 0;
     while(peek_or_getkey() == -1) {
         printf("\ri8253:%lu.%02u", (timer_ticks / 100U), (unsigned)(timer_ticks % 100U));
         if (hasHitimer || disp_all) {
@@ -306,7 +324,7 @@ int main(int argc, char **argv)
             if (optX) printf(" (0x%08lX)", ht);
         }
         if (hasARTIC || disp_all) {
-            unsigned long ar = get_artic32() - ar_base32;
+            unsigned long ar = get_artic32(use_inpd) - ar_base32;
             unsigned long aru = ar % 307200UL;
             printf(" ARTIC:%u.%06lu", (unsigned)(ar / 307200UL), (aru * 10000U) / 3072U);
             if (optX) printf(" (0x%08lX)", ar);
