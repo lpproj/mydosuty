@@ -4,13 +4,13 @@
     target: MS-DOS for PC-98x1 (or EPSON compatibles)
 
     legend:
-    i8253    - PIT, counted by 10ms (all of PC-98 series)
+    PIT      - i8253, counted by 10ms (all of PC-98 series)
     hitimer  - IDE timer, counted by 32ndsecs (PC-9821 with IDE HD)
     ARTIC    - 307.2KHz time stamper, counted by 3.26us (PC-9821, PC-9801fellow, H98)
 
     to build with (Open)Watcom:
         nasm -f obj -o pc98thdl.obj pc98thdl.asm
-        wcl -zq -s -bt=dos pc98tick.c pc98thdl.obj
+        wcl -zq -za99 -s -bt=dos pc98tick.c pc98thdl.obj
 
     to build with Turbo C/C++:
         nasm -f obj -o pc98thdl.obj pc98thdl.asm
@@ -53,6 +53,20 @@ For more information, please refer to <http://unlicense.org/>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if (__STDC_VERSION__) >= 199901L
+# include <stdint.h>
+# include <inttypes.h>
+typedef uint64_t artic_t;
+# define PRIuART  PRIu64
+# define PRIXART  PRIX64
+# define PRI0XART "016" PRIX64
+#else
+typedef unsigned long artic_t;
+# define PRIuART  "lu"
+# define PRIXART  "lX"
+# define PRI0XART "08lX"
+#endif
+
 
 #if defined __TURBOC__
 # define CDECL cdecl
@@ -211,8 +225,9 @@ unsigned long get_ht24(void)
 }
 
 static unsigned long ar_prev24;
-static unsigned ar_2432;
-unsigned long get_artic32(int use_inpd)
+static artic_t ar_offset;
+
+artic_t get_artic(int use_inpd)
 {
     unsigned long ar;
 
@@ -230,9 +245,32 @@ unsigned long get_artic32(int use_inpd)
         my_enable();
         ar = ((unsigned long)(th & 0xff00U) << 8) | tl;
     }
-    if (ar_prev24 > ar) ar_2432 += 0x0100;
+    if (ar_prev24 > ar) ar_offset += 0x01000000UL;
     ar_prev24 = ar;
-    return ar | ((unsigned long)ar_2432 << 16);
+    return ar_offset | ar;
+}
+
+static unsigned bcd2num(unsigned char bcd)
+{
+    return (bcd >> 4) * 10 + (bcd & 0x0f);
+}
+
+unsigned long disp_caltime(int do_disp)
+{
+    unsigned char dt[6];
+    unsigned h, m, s;
+
+    r.x.bx = FP_OFF(dt);
+    sr.es = FP_SEG(dt);
+    r.h.ah = 0;
+    int86x(0x1c, &r, &r, &sr);
+    h = bcd2num(dt[3]);
+    m = bcd2num(dt[4]);
+    s = bcd2num(dt[5]);
+    if (do_disp) {
+        printf("%02u%02X/%02X/%02X %02X:%02X:%02X", dt[0] >= 0x80 ? 19 : 20, dt[0], dt[1] >> 4, dt[2], dt[3], dt[4], dt[5]);
+    }
+    return 3600UL * h + 60 * m + s;
 }
 
 
@@ -294,8 +332,9 @@ int main(int argc, char **argv)
     int disp_all;
     int init_pit_bios;
     int use_inpd;
+    unsigned long cal_begin, cal_end;
     unsigned long ht_base;
-    unsigned long ar_base32;
+    artic_t ar_base;
 
     get98env();
     my_getopt(argc, argv);
@@ -309,31 +348,37 @@ int main(int argc, char **argv)
 
     printf("sysclk:%dMHz Wait5F:%d ARTIC:%d hitimer:%d\n", is8MHz ? 8:5, hasWait5F, hasARTIC, hasHitimer);
 
+    printf("Begin at ");
+    cal_begin = disp_caltime(1);
+    printf("\n");
     hook_timer();
     start_timer(init_pit_bios);
     printf("press any key to exit...");
     fflush(stdout);
     printf("\n");
     ht_base = (hasHitimer || disp_all) ? get_ht24() : 0;
-    ar_base32 = (hasARTIC || disp_all) ? get_artic32(use_inpd) : 0;
+    ar_base = (hasARTIC || disp_all) ? get_artic(use_inpd) : 0;
     while(peek_or_getkey() == -1) {
-        printf("\ri8253:%lu.%02u", (timer_ticks / 100U), (unsigned)(timer_ticks % 100U));
+        printf("\rPIT:%lu.%02u", (timer_ticks / 100U), (unsigned)(timer_ticks % 100U));
         if (hasHitimer || disp_all) {
             unsigned long ht = get_ht24() - ht_base;
             printf(" hitimer:%lu.%02u", (ht / 32U), ((ht % 32U) * 100U) / 32U);
-            if (optX) printf(" (0x%08lX)", ht);
+            if (optX) printf(" (0x%lX)", ht);
         }
         if (hasARTIC || disp_all) {
-            unsigned long ar = get_artic32(use_inpd) - ar_base32;
+            artic_t ar = get_artic(use_inpd) - ar_base;
             unsigned long aru = ar % 307200UL;
-            printf(" ARTIC:%u.%06lu", (unsigned)(ar / 307200UL), (aru * 10000U) / 3072U);
-            if (optX) printf(" (0x%08lX)", ar);
+            printf(" ARTIC:%lu.%06lu", (unsigned long)(ar / 307200UL), (aru * 10000U) / 3072U);
+            if (optX) printf(" (0x%" PRIXART ")", ar);
         }
-        printf(" ");
         fflush(stdout);
     }
     printf("\n");
     unhook_timer();
+    printf("End at ");
+    cal_end = disp_caltime(1);
+    printf(" (%lusecs)\n", (cal_end >= cal_begin) ? cal_end - cal_begin : (cal_end + 3600UL*24) - cal_begin);
+
     return 0;
 }
 
