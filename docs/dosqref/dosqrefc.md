@@ -211,6 +211,8 @@ int 21h以外のDOS機能・コールバックハンドラ
   - ドライバヘッダ rbint:[Table 01646](http://www.delorie.com/djgpp/doc/rbinter/it/46/16.html)
   - コマンドリスト rbint:[Table 02595](http://www.delorie.com/djgpp/doc/rbinter/it/95/25.html)
   - リクエストヘッダ rbint:[Table 02597](http://www.delorie.com/djgpp/doc/rbinter/it/97/25.html)
+  - ステータスコード rbint:[Table 02596](http://www.delorie.com/djgpp/doc/rbinter/it/96/25.html)
+  - エラーコード rbint:[Table 02598](http://www.delorie.com/djgpp/doc/rbinter/it/98/25.html)
 - CDS(カレントディレクトリストラクチャー) rbint:[Table 01643](http://www.delorie.com/djgpp/doc/rbinter/it/43/16.html)
 - ディスクバッファ
   - DOS 2.x rbint:[Table 01649](http://www.delorie.com/djgpp/doc/rbinter/it/49/16.html)
@@ -411,6 +413,8 @@ rbint:[D-217305CXFFFF](http://www.delorie.com/djgpp/doc/rbinter/id/42/32.html)
 - int 21h AH=59h BX=0000h 拡張エラー情報の取得 rbint:[D-2159--BX0000](http://www.delorie.com/djgpp/doc/rbinter/id/24/30.html)
 - int 21h AX=5D0Ah 拡張エラーコード設定 rbint:[D-215D0A](http://www.delorie.com/djgpp/doc/rbinter/id/39/30.html)
 - DOS拡張エラーコード　rbint:[Table 01680](http://www.delorie.com/djgpp/doc/rbinter/it/80/16.html)
+
+- デバイスドライバ ステータスコード rbint:[Table 02596](http://www.delorie.com/djgpp/doc/rbinter/it/96/25.html) とエラーコード rbint:[Table 02598](http://www.delorie.com/djgpp/doc/rbinter/it/98/25.html)
 
 - int 23h Ctrl-Cハンドラ rbint:[D-23](http://www.delorie.com/djgpp/doc/rbinter/id/25/41.html)
 
