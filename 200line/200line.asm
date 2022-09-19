@@ -49,8 +49,9 @@ dev_header:
 	dd	-1
 	dw	8000h
 	dw	Strategy
+dev_commands:
 	dw	Init_Commands
-	db	"$200line"
+	db	"$200LINE"
 
 dev_packet	dd	0
 
@@ -101,6 +102,8 @@ Init_Commands:
 	mov	ah, 09h
 	mov	dx, msgOpening
 	int	21h
+
+	mov	word [dev_commands], Commands
 
 	push	es
 	mov	ax, 3518h
