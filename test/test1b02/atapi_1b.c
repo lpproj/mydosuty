@@ -20,6 +20,7 @@
 
     revision:
     20230514 lpproj initial
+    20230515 lpproj scan BIOS to fetch the paramtable address
 */
 
 /*
@@ -233,11 +234,54 @@ unsigned idebios_seg(void)
     return ideseg;
 }
 
+void far *scan_paramtable_base(unsigned ideseg)
+{
+    /*
+      IDE BIOS内のパラメータテーブルのアドレスを調べる。
+      2100h固定じゃなくて、存在しない場合もあるらしいので、BIOS内の
+      アドレス算出コードっぽいものの存在をスキャンして取り出すように
+      してみた。（有効性がどの程度なのか未確認）
+    */
+    static unsigned param_off = 0xffffU;
+    const unsigned char sig_code[] = {
+        /* 0xbb, 0x00, 0x00, */ /* mov bx, offset IDEBIOSSEG: paramtable */
+        0x33, 0xc9,             /* xor cx, cx */
+        0x8a, 0x6e, 0x00,       /* mov ch, [bp] */
+        0xb1, 0x05,             /* mov cl, 5 */
+        0xd2, 0xe5,             /* shl ch, cl */
+        0x32, 0xc9,             /* xor cl, cl */
+        0x86, 0xe9,             /* xchg ch, cl */
+        0x03, 0xd9              /* add bx, cx */
+    };
+
+    if (param_off == 0xffffU && ideseg) {
+        const unsigned char far *m = MK_FP(ideseg, 0);
+        const unsigned s_begin = 0x0003;
+        const unsigned s_end = 0x2000 - sizeof(sig_code);
+        unsigned s_cur;
+        for(s_cur = s_begin; s_cur < s_end; ++s_cur) {
+            unsigned n;
+            for(n=0; n<sizeof(sig_code); ++n) {
+                if (m[s_cur + n] != sig_code[n]) break;
+            }
+            if (n == sizeof(sig_code)) {
+                param_off = *(unsigned short far *)(m + s_cur - 2);
+            }
+        }
+        if (param_off == 0xffffU) param_off = 0;
+    }
+    if (param_off == 0 || ideseg == 0) return NULL;
+    return MK_FP(ideseg, param_off);
+}
+
 void far *get_ide_paramtable(int daua)
 {
     if ((daua & (-1 ^ 0x87)) == 0) {
         unsigned ideseg = idebios_seg();
-        if (ideseg) return MK_FP(ideseg, (0x2100U + ((daua&7)<<5)));
+        if (ideseg) {
+            char far *p = scan_paramtable_base(ideseg);
+            if (p) return (void far *)(p + ((daua&7)<<5));
+        }
     }
 
     return NULL;
@@ -316,12 +360,25 @@ int main(int argc, char **argv)
         return 1;
     }
     ide_param = get_ide_paramtable(daua);
+    printf("IDEBIOS parameter table ");
+    if (ide_param) {
+        void far *p_base = get_ide_paramtable(0);
+        printf("%04X:%04X", FP_SEG(ide_param), FP_OFF(ide_param));
+        printf(" (base %04X:%04X)\n", FP_SEG(p_base), FP_OFF(p_base));
+    }
+    else
+        printf("(not found)\n");
 
     memset(buf, 0xff, sizeof(buf));
     cdb_inquiry[4] = inqsize;
-    if (optF && ide_param) {
-        flag_bak = ide_param[0x10];
-        ide_param[0x10] |= 1;   /* enable IDEBIOS ah=02,dl=ffh and ah=16h */
+    if (optF) {
+        if (ide_param) {
+            flag_bak = ide_param[0x10];
+            ide_param[0x10] |= 1;   /* enable IDEBIOS ah=02,dl=ffh and ah=16h */
+        }
+        else {
+            fprintf(stderr, "warning: ignore option -F\n");
+        }
     }
     rc = send_atapi_cmd_and_receive(daua, cdb_inquiry, sizeof(cdb_inquiry), buf, inqsize);
     if (optF && ide_param) {
