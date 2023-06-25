@@ -1,0 +1,6 @@
+#
+*.asm text working-tree-encoding=CP932 eol=auto
+*.png binary
+*.jpg binary
+*.zip binary
+
