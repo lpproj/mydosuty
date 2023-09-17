@@ -2,7 +2,7 @@
   format2hd: a minimal 2HD (1024bytes/sector) FD formatter
              for Win10 anniversary(lol) update.
   
-  Copyright (C) 2016-2019 sava
+  Copyright (C) 2016-2023 sava
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -35,6 +35,21 @@
 #include <string.h>
 #include <time.h>
 
+/* workaround for some old (or wrong) SDK/DDK header */
+#define F3_120M_512		13
+#define F3_640_512		14
+#define F5_640_512		15
+#define F5_720_512		16
+#define F3_1Pt2_512		17
+#define F3_1Pt23_1024	18
+#define F5_1Pt23_1024	19
+#define F3_128Mb_512	20
+#define F3_230Mb_512	21
+#define F8_256_128		22
+#define F3_200Mb_512	23
+#define F3_240M_512		24
+#define F3_32M_512		25
+
 #ifndef _T
 #define _T TEXT
 #endif
@@ -42,6 +57,7 @@
 #define ALLOW_FAKE640 1
 # define ALLOW_FAKE640TEST 1
 #define ALLOW_DMF 1
+/* #define ALLOW_SINGLE_SIDE 1 */
 /* #define EJECT_AFTER_FORMAT 1 */
 /* #define BE_SENSITIVE_ABOUT_UPDAING_BPB 0 */
 
@@ -71,8 +87,10 @@ typedef struct BPBCORE {
 
 BPBCORE bpb_640 = { 512, 2, 1, 2, 0x70, 8*2*80, 0xfb, 2, 8, 2 };
 BPBCORE bpb_720 = { 512, 2, 1, 2, 0x70, 9*2*80, 0xf9, 3, 9, 2 };
+BPBCORE bpb_1dd360 = { 512, 2, 1, 2, 0x70, 9*1*80, 0xf8, 3, 9, 1 };
 BPBCORE bpb_2hc = { 512, 1, 1, 2, 0xe0, 15*2*80, 0xf9, 7, 15, 2 };
 BPBCORE bpb_2hd = { 1024, 1, 1, 2, 0xc0, 8*2*77, 0xfe, 2, 8, 2 };
+BPBCORE bpb_2hd80 = { 1024, 1, 1, 2, 0xc0, 8*2*80, 0xf0, 2, 8, 2 };
 BPBCORE bpb_1440 = { 512, 1, 1, 2, 0xe0, 18*2*80, 0xf0, 9, 18, 2 };
 BPBCORE bpb_2880 = { 512, 1, 1, 2, 0xf0, 36*2*80, 0xf0, 9, 36, 2 };
 
@@ -238,7 +256,7 @@ HANDLE open_drive_a(int drive0, DWORD dw_acc)
 DWORD format_track(HANDLE hDrive, MEDIA_TYPE mediaType, DWORD cylinder, DWORD head, int sector)
 {
 	DWORD dwRC = (DWORD)-1;
-	
+
 	if (mediaType == F3_1Pt44_512 && sector != 0 && sector > 18) {
 		WORD n;
 		WORD secnum;
@@ -328,10 +346,69 @@ DWORD format_track_bpb(HANDLE hDrive, const BPBCORE *bpb, MEDIA_TYPE mediaType, 
 }
 
 
-BOOL is_drive_fdd(int drive0, BOOL *is_5inch)
+static BOOL print_media_type(const DISK_GEOMETRY *g)
+{
+	static const char *mtstr[] = {
+		"unknown medium",
+		"5.25\" 1.2M",
+		"3.5\" 1.44M",
+		"3.5\" 2.88M",
+		"3.5\" 20.8M",
+		"3.5\" 720K",
+		"5.25\" 360K",
+		"5.25\" 320K",
+		"5.25\" 320K 1024bytes/sct",
+		"5.25\" 180K",
+		"5.25\" 160K",
+		"non-floppy removable medium",
+		"non-removable drive",
+		"3.5\" 120M",
+		"3.5\" 640K",
+		"5.25\" 640K",
+		"5.25\" 720K",
+		"3.5\" 1.2M",
+		"3.5\" 1.23M 1024bytes/sct",
+		"5.25\" 1.23M 1024bytes/sct",
+		"3.5\" 128M",
+		"3.5\" 230M",
+		"8\" 256K 128bytes/sct",
+		"3.5\" 200M HiFD",
+		"3.5\" 240M HiFD",
+		"3.5\" 32M"
+	};
+	BOOL rc = FALSE;
+
+	printf("mediaType=%u", g->MediaType);
+	if (g->MediaType < sizeof(mtstr)/sizeof(mtstr[0])) {
+		printf(" (%s)", mtstr[g->MediaType]);
+		rc = TRUE;
+	}
+	printf(", cyl=%u, head=%u, sct=%u, %ubytes/sct\n", (unsigned)(g->Cylinders.LowPart), (unsigned)(g->TracksPerCylinder), (unsigned)(g->SectorsPerTrack), (unsigned)(g->BytesPerSector));
+	return rc;
+}
+
+static BOOL is_media_5inch(DWORD mt)
+{
+	switch(mt) {
+		case F5_1Pt2_512:
+		case F5_360_512:
+		case F5_320_512:
+		case F5_320_1024:
+		case F5_180_512:
+		case F5_160_512:
+		/* case F8_256_128: */
+		case F5_640_512:
+		case F5_720_512:
+		case F5_1Pt23_1024:
+			return TRUE;
+	}
+	return FALSE;
+}
+
+BOOL check_drive_media_type(int drive0, BOOL *is_5inch, BOOL list_types)
 {
 	HANDLE hDrive;
-	DISK_GEOMETRY g[8];		// enough? 
+	DISK_GEOMETRY g[16];		// enough?
 	DWORD dwRC, dwlen;
 	BOOL rc = FALSE;
 	BOOL b5inch = FALSE;
@@ -345,7 +422,7 @@ BOOL is_drive_fdd(int drive0, BOOL *is_5inch)
 		dwRC = DevIo_WithErr(hDrive,
 		                     IOCTL_DISK_GET_MEDIA_TYPES /* IOCTL_STORAGE_GET_MEDIA_TYPES (will not work for FDD...) */,
 		                     NULL, 0, 
-		                     &g, sizeof(g),
+		                     &(g[0]), sizeof(g),
 		                     &dwlen,
 		                     NULL);
 		if (dwRC != ERROR_INVALID_DRIVE && dwRC != ERROR_MEDIA_CHANGED) break;
@@ -356,25 +433,29 @@ BOOL is_drive_fdd(int drive0, BOOL *is_5inch)
 		unsigned i, n;
 		rc = FALSE;
 		n = dwlen / sizeof(g[0]);
+		if (list_types) {
+			printf("Number of supported medium type : %u\n", n);
+		}
+		// detect 5.25 medium
 		for(i=0; i<n; ++i) {
-			if ((g[i].MediaType >= 1 && g[i].MediaType <= 10) ||
-			    (g[i].MediaType >= 13 && g[i].MediaType <= 25) )
+			if (is_media_5inch(g[i].MediaType)) {
+				b5inch = TRUE;
+				break;
+			}
+		}
+		// detect 3.5 medium (and overwrite 5.25 setting)
+		for(i=0; i<n; ++i) {
+			const DWORD mt = g[i].MediaType;
+			if (list_types) {
+				print_media_type(&(g[i]));
+			}
+			if ((mt >= 1 && mt <= 10) ||
+			    (mt >= 13 && mt <= 25) )
 			{
 				rc = TRUE;
-			}
-			switch(g[i].MediaType) {
-				case F5_1Pt2_512:
-				case F5_360_512:
-				case F5_320_512:
-				/* case F5_320_1024: */
-				case F5_180_512:
-				case F5_160_512:
-				case F5_720_512:
-				case F5_1Pt23_1024:
-					b5inch = TRUE;
-				default:
-					// b5inch = FALSE;
-					break;
+				if (!is_media_5inch(mt) && mt != F8_256_128) {
+					b5inch = FALSE;
+				}
 			}
 		}
 	}
@@ -387,6 +468,10 @@ BOOL is_drive_fdd(int drive0, BOOL *is_5inch)
 	return rc;
 }
 
+BOOL is_drive_fdd(int drive0, BOOL *is_5inch)
+{
+	return check_drive_media_type(drive0, is_5inch, FALSE);
+}
 
 static unsigned long  tm_to_volume_serial(const struct tm *tm)
 {
@@ -447,7 +532,7 @@ void make_bootsector(void *buffer, const BPBCORE *bpb, const void *bootsect)
 	}
 #if ALLOW_DMF
 	if (bpb->sectors == 21*2*80) {
-		CopyMemory(buf + 3, "MSDMF3.2", 8); /* guess that it might not be required. just to be safe... */
+		CopyMemory(buf + 3, "MSDMF3.2", 8); /* it seems that some USB-FDDs look "MSDMF?.?" OEM string in the boot sector to use it as DMF diskette... */
 	}
 #endif
 
@@ -564,7 +649,7 @@ DWORD format_fd_bpb(int drive0, const BPBCORE *bpb0, int do_verify, int buildfs,
 	const BPBCORE *bpb = bpb0;
 
 	if (!is_drive_fdd(drive0, &is_5inch)) return ERROR_INVALID_DRIVE;
-	mediaType = MediaTypeFromBPB(bpb, 0);
+	mediaType = MediaTypeFromBPB(bpb, is_5inch);
 	if (!mediaType) return ERROR_INVALID_DRIVE;
 #if ALLOW_FAKE640
 	if ((mediaType == F5_640_512 || mediaType == F3_640_512) && buildfs && fake640 != NO_FAKE640) {
@@ -672,6 +757,7 @@ static int optHelp;
 static int optQ;
 static int optS;
 static int optU;
+static int optList;
 static int optRaw;
 static int optVerify;
 static int optNoPrompt;
@@ -703,8 +789,13 @@ int mygetopt(int argc, char *argv[])
 		s = *argv;
 		c = *s;
 		if (c == '-' || c == '/') {
-			switch(toupper(*++s)) {
-				case '?': optHelp = 1; break;
+			++s;
+			if (c == '-' && *s == '-' && s[1] != '\0') ++s;
+			switch(toupper(*s)) {
+				case '?': case 'H': optHelp = 1; break;
+				case 'L':
+					if (eqf(s, "LIST")) { optList = 1; }
+					break;
 				case 'Q': optQ = 1; break;
 				case 'S': optS = 1; break;
 				case 'U': optU = 1; break;
@@ -730,6 +821,7 @@ int mygetopt(int argc, char *argv[])
 #endif
 						if (eqf(s, "640") && !eqf(s, "640f")) opt_bpb = &bpb_640;
 						else if (eqf(s, "720") || eqf(s, "2DD")) opt_bpb = &bpb_720;
+						else if (eqf(s, "2HD80")) opt_bpb = &bpb_2hd80;
 						else if (eqf(s, "2HD") || eqf(s, "1.23") || eqf(s, "1.25") || eqf(s, "123") || eqf(s, "125")) opt_bpb = &bpb_2hd;
 						else if (eqf(s, "1.44") || eqf(s, "144")) opt_bpb = &bpb_1440;
 						else if (eqf(s, "2.88") || eqf(s, "288") || eqf(s, "2ED")) opt_bpb = &bpb_2880;
@@ -759,6 +851,7 @@ void put_usage(void)
 		"format a floppy disk\n"
 		"\n"
 		"%s drive: [/F:size] [/RAW] [/VERIFY] [/NOPROMPT]\n"
+		"%s drive: /LIST\n"
 		"\n"
 		"  /F:size  specify size of the disk\n"
 		"     640   640K  2DD (8sectors, 80cylinders, 512bytes per sector)\n"
@@ -783,6 +876,8 @@ void put_usage(void)
 		"  /VERIFY  format with verify (simply abort when error)\n"
 		"  /NOPROMPT\n"
 		"           do format without waiting keyboard input by user\n"
+		"\n"
+		"  /LIST    print supported medium type by the drive (just for reference)\n"
 		;
 
 	printf("%s", progname);
@@ -793,9 +888,8 @@ void put_usage(void)
 	printf("Win32");
 #endif
 	printf(", built at " __DATE__ " " __TIME__ ")\n");
-	printf(msg, progname);
+	printf(msg, progname, progname);
 }
-
 
 
 int main(int argc, char *argv[])
@@ -808,6 +902,15 @@ int main(int argc, char *argv[])
 	return optHelp ? 0 : -1;
 	}
 
+	if (optList) {
+		BOOL is_5inch = FALSE;
+		if (check_drive_media_type(drivenum0, &is_5inch, optList)) {
+			if (is_5inch) printf("Guess the drive %c is 5.25\" FDD.\n", 'A' + drivenum0);
+			return 0;
+		}
+		fprintf(stderr, "Error: the drive %c is not ready, not FDD or not exist.\n", 'A' + drivenum0);
+		return 1;
+	}
 	if (drivenum0 >= 0 && !opt_bpb) opt_bpb = &bpb_1440;
 	dwRC = format_fd_bpb(drivenum0, opt_bpb, optVerify, !optRaw, !optNoPrompt, optFake640);
 	return dispErr(dwRC);
