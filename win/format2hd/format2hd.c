@@ -26,8 +26,9 @@
 */
 
 
-#include <conio.h>
 #include <windows.h>
+#include <conio.h>
+#include <limits.h>
 #include <ctype.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -59,7 +60,10 @@
 #define ALLOW_DMF 1
 /* #define ALLOW_SINGLE_SIDE 1 */
 /* #define EJECT_AFTER_FORMAT 1 */
-/* #define BE_SENSITIVE_ABOUT_UPDAING_BPB 0 */
+
+#ifndef SENSITIVE_ABOUT_UPDAING_BPB
+# define SENSITIVE_ABOUT_UPDAING_BPB  ALLOW_SINGLE_SIDE
+#endif
 
 enum {
 	NO_FAKE640 = 0,
@@ -87,7 +91,8 @@ typedef struct BPBCORE {
 
 BPBCORE bpb_640 = { 512, 2, 1, 2, 0x70, 8*2*80, 0xfb, 2, 8, 2 };
 BPBCORE bpb_720 = { 512, 2, 1, 2, 0x70, 9*2*80, 0xf9, 3, 9, 2 };
-BPBCORE bpb_1dd360 = { 512, 2, 1, 2, 0x70, 9*1*80, 0xf8, 3, 9, 1 };
+BPBCORE bpb_1dd320 = { 512, 2, 1, 2, 0x70, 8*1*80, 0xfa, 1, 9, 1 };
+BPBCORE bpb_1dd360 = { 512, 2, 1, 2, 0x70, 9*1*80, 0xf8, 2, 9, 1 };
 BPBCORE bpb_2hc = { 512, 1, 1, 2, 0xe0, 15*2*80, 0xf9, 7, 15, 2 };
 BPBCORE bpb_2hd = { 1024, 1, 1, 2, 0xc0, 8*2*77, 0xfe, 2, 8, 2 };
 BPBCORE bpb_2hd80 = { 1024, 1, 1, 2, 0xc0, 8*2*80, 0xf0, 2, 8, 2 };
@@ -135,8 +140,11 @@ struct ERRNAME {
 	{ ERROR_SEEK, "Seek Error" },
 	{ ERROR_NOT_DOS_DISK, "Not MS-DOS Compatible Disk" },
 	{ ERROR_SECTOR_NOT_FOUND, "Sector Not found" },
+	{ ERROR_WRITE_FAULT, "Write Fault" },
+	{ ERROR_READ_FAULT, "Read Fault" },
 	{ ERROR_SHARING_VIOLATION, "Sharing Violation" },
 	{ ERROR_LOCK_VIOLATION, "Can't Lock" },
+	{ ERROR_WRONG_DISK, "Wrong Disk" },
 	{ ERROR_NOT_SUPPORTED, "Not Supported" },
 	{ ERROR_INVALID_PARAMETER, "Invalid Parameter" },
 	
@@ -544,7 +552,7 @@ void make_bootsector(void *buffer, const BPBCORE *bpb, const void *bootsect)
 DWORD write_fs_fat12(HANDLE hDrv, const BPBCORE *bpb, const void *bootsect, unsigned physical_sectors_per_head, int build_fake640_testdisk)
 {
 	DWORD dwRC;
-	DWORD dwWritten;
+	DWORD dwWritten = 0;
 	unsigned long lba_fat, lba_root, lba_total;
 	unsigned dirent_sectors;
 	unsigned i;
@@ -603,8 +611,8 @@ DWORD write_fs_fat12(HANDLE hDrv, const BPBCORE *bpb, const void *bootsect, unsi
 		unsigned long lbadir = bpb->reserved_sectors + (bpb->sectors_per_fat * bpb->fats);
 		unsigned char *pdir = buf + lbadir * sb;
 		memcpy(pdir, check_dirent, sizeof(check_dirent));
-		strcpy(buf + (lba_total + 1) * sb, ok640);
-		strcpy(buf + (lba_total + 0) * sb, no720);
+		strcpy((char *)buf + (lba_total + 1) * sb, ok640);
+		strcpy((char *)buf + (lba_total + 0) * sb, no720);
 	}
 
 	if (SetFilePointer(hDrv, 0, NULL, FILE_BEGIN) == 0 && WriteFile(hDrv, buf, bufsize_total, &dwWritten, NULL)) {
@@ -624,6 +632,88 @@ DWORD write_fs_fat12(HANDLE hDrv, const BPBCORE *bpb, const void *bootsect, unsi
 }
 
 
+DWORD write_disk_image(HANDLE hDrv, const BPBCORE *bpb, const char *imagefile, int disp_progress)
+{
+	const unsigned track_buf_max = 0x8000;
+	DWORD dwRC = 0;
+	DWORD dwRD, dwWR;
+	HANDLE hf;
+	BY_HANDLE_FILE_INFORMATION finf;
+	unsigned i;
+	unsigned bps;
+	unsigned total_sct;
+	unsigned char *buf;
+	unsigned buf_max;
+	unsigned scnt_max;
+	unsigned __int64  ui64;
+
+	bps = bpb->bytes_per_sector;
+	total_sct = bpb->sectors;
+	scnt_max = bpb->sectors_per_head;
+	buf_max = bps * scnt_max;
+	if (buf_max > track_buf_max) {
+		scnt_max = track_buf_max / bpb->sectors_per_head;
+		buf_max = bps * scnt_max;
+	}
+	if (scnt_max == 0) {
+		return (DWORD)-1;
+	}
+	buf = VirtualAlloc(0, buf_max, MEM_COMMIT, PAGE_READWRITE);
+	if (!buf) return GetLastError();
+	hf = CreateFileA(imagefile, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hf == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(hf, &finf)) {
+		dwRC = GetLastError();
+		VirtualFree(buf, bps, MEM_RELEASE);
+		return dwRC;
+	}
+	ui64 = (((unsigned __int64)(finf.nFileSizeHigh) << 32) | finf.nFileSizeLow) / bps;
+	if (ui64 < total_sct) total_sct = (unsigned)ui64;
+	for (i=0;;) {
+		unsigned scnt;
+		if (disp_progress) {
+			if (i <= total_sct) {
+				unsigned cur = i + (i < total_sct);
+				unsigned pm = (cur * 1000U) / total_sct;
+				fprintf(stderr, "\r%u/%u (%u.%u%%)", cur, total_sct, pm / 10, pm % 10);
+			}
+		}
+		if (i >= total_sct) break;
+		ZeroMemory(buf, buf_max);
+		scnt = total_sct - i;
+		if (scnt > scnt_max) scnt = scnt_max;
+		dwRD = 0;
+		if (!ReadFile(hf, buf, scnt * bps, &dwRD, NULL) || dwRD == 0) {
+			dwRC = GetLastError();
+			break;
+		}
+		if (i==0) { // workaround for abnormal BPB disk
+			ZeroMemory(buf, bps);
+		}
+		dwWR = 0;
+		if (!WriteFile(hDrv, buf, dwRD, &dwWR, NULL) || dwWR != dwRD) {
+			dwRC = GetLastError();
+			break;
+		}
+		i += scnt;
+	}
+	if (dwRC == 0) {
+		if (disp_progress) fprintf(stderr, " and re-write boot sector");
+		dwRD = dwWR = 0;
+		if (SetFilePointer(hf, 0, NULL, FILE_BEGIN) == (DWORD)-1
+		 || SetFilePointer(hDrv, 0, NULL, FILE_BEGIN) == (DWORD)-1
+		 || !ReadFile(hf, buf, bps, &dwRD, NULL) || dwRD == 0
+		 || !WriteFile(hDrv, buf, bps, &dwWR, NULL) || dwWR == 0)
+		{
+			dwRC = GetLastError();
+		}
+	}
+
+	CloseHandle(hf);
+	VirtualFree(buf, buf_max, MEM_RELEASE);
+
+	return dwRC;
+}
+
 static void print_formatting_parameter(const BPBCORE *bpb)
 {
 	fprintf(stderr, "Formatting %uKiB (%u sectors, %u head(s), %u cylinders, %u bytes/sct)\n"
@@ -636,17 +726,20 @@ static void print_formatting_parameter(const BPBCORE *bpb)
 }
 
 
-DWORD format_fd_bpb(int drive0, const BPBCORE *bpb0, int do_verify, int buildfs, int do_prompt, int fake640)
+DWORD format_fd_bpb(int drive0, const BPBCORE *bpb0, int do_verify, const char *imagefilename, int buildfs, int do_prompt, int fake640)
 {
 	int do_msg = 1;
 	DWORD dwRC = 0;
-	DWORD dwEject;
+	UINT uPrevErrMode;
 	HANDLE hDrive;
 	MEDIA_TYPE mediaType;
 	unsigned total_tracks, track;
 	BOOL is_5inch = FALSE;
 	unsigned physical_sectors_per_head = 0;
 	const BPBCORE *bpb = bpb0;
+#if EJECT_AFTER_FORMAT
+	DWORD dwEject;
+#endif
 
 	if (!is_drive_fdd(drive0, &is_5inch)) return ERROR_INVALID_DRIVE;
 	mediaType = MediaTypeFromBPB(bpb, is_5inch);
@@ -721,18 +814,25 @@ DWORD format_fd_bpb(int drive0, const BPBCORE *bpb0, int do_verify, int buildfs,
 	}
 	if (do_msg) fprintf(stderr, "\n");
 
+	// DevIo_NoParam(hDrive,  FSCTL_DISMOUNT_VOLUME);
+	uPrevErrMode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
 	SetFilePointer(hDrive, 0, NULL, FILE_BEGIN);
-	if (dwRC == 0 && buildfs) {
-		if (do_msg) {
-			fprintf(stderr, "Building FAT12 filesystem");
-			if (fake640 != NO_FAKE640) {
-				fprintf(stderr, " (fake640%s)", fake640 == FAKE640_TEST ? " testdisk" : "");
-			}
-			fprintf(stderr, "...");
+	if (dwRC == 0) {
+		if (imagefilename && *imagefilename) {
+			if (do_msg) fprintf(stderr, "Writing disk image '%s' into the disk.\n", imagefilename);
+			dwRC = write_disk_image(hDrive, bpb0, imagefilename, do_msg);
+			if (do_msg) fprintf(stderr, "...%s\n", dwRC ? "failure" : "ok");
 		}
-		dwRC = write_fs_fat12(hDrive, bpb0, bootsect_dummy, physical_sectors_per_head, fake640 == FAKE640_TEST);
-		if (do_msg) {
-			fprintf(stderr, "%s\n", dwRC ? "failure" : "ok");
+		else if (buildfs) {
+			if (do_msg) {
+				fprintf(stderr, "Building FAT12 filesystem");
+				if (fake640 != NO_FAKE640) {
+					fprintf(stderr, " (fake640%s)", fake640 == FAKE640_TEST ? " testdisk" : "");
+				}
+				fprintf(stderr, "...");
+			}
+			dwRC = write_fs_fat12(hDrive, bpb0, bootsect_dummy, physical_sectors_per_head, fake640 == FAKE640_TEST);
+			if (do_msg) fprintf(stderr, "%s\n", dwRC ? "failure" : "ok");
 		}
 	}
 
@@ -747,6 +847,7 @@ DWORD format_fd_bpb(int drive0, const BPBCORE *bpb0, int do_verify, int buildfs,
 #else
 	CloseHandle(hDrive);
 #endif
+	SetErrorMode(uPrevErrMode);
 
 	return dwRC;
 }
@@ -762,6 +863,7 @@ static int optRaw;
 static int optVerify;
 static int optNoPrompt;
 static int optFake640 = NO_FAKE640;
+static char *optImage;
 int drivenum0 = -1;
 
 static int cmpoptf(const char *s1, const char *s2)
@@ -793,6 +895,17 @@ int mygetopt(int argc, char *argv[])
 			if (c == '-' && *s == '-' && s[1] != '\0') ++s;
 			switch(toupper(*s)) {
 				case '?': case 'H': optHelp = 1; break;
+				case 'I':
+					if (s[1] == ':' || s[1] == '=') {
+						optImage = s + 2;
+						break;
+					}
+					if (s[1] == '\0' && argc >= 2) {
+						--argc;
+						optImage = *++argv;
+						break;
+					}
+					break; /* invalid option */
 				case 'L':
 					if (eqf(s, "LIST")) { optList = 1; }
 					break;
@@ -850,7 +963,7 @@ void put_usage(void)
 	const char msg[] = 
 		"format a floppy disk\n"
 		"\n"
-		"%s drive: [/F:size] [/RAW] [/VERIFY] [/NOPROMPT]\n"
+		"%s drive: [/F:size] [/I:imagefile] [/RAW] [/VERIFY] [/NOPROMPT]\n"
 		"%s drive: /LIST\n"
 		"\n"
 		"  /F:size  specify size of the disk\n"
@@ -874,6 +987,8 @@ void put_usage(void)
 		"\n"
 		"  /RAW     format only (do not build FAT filesystem after format)\n"
 		"  /VERIFY  format with verify (simply abort when error)\n"
+		"  /I:imagefile\n"
+		"           format and write specified image file into the disk\n"
 		"  /NOPROMPT\n"
 		"           do format without waiting keyboard input by user\n"
 		"\n"
@@ -912,7 +1027,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 	if (drivenum0 >= 0 && !opt_bpb) opt_bpb = &bpb_1440;
-	dwRC = format_fd_bpb(drivenum0, opt_bpb, optVerify, !optRaw, !optNoPrompt, optFake640);
+	dwRC = format_fd_bpb(drivenum0, opt_bpb, optVerify, optImage, !optRaw, !optNoPrompt, optFake640);
 	return dispErr(dwRC);
 }
 
