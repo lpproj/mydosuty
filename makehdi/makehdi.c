@@ -472,7 +472,7 @@ int buildHDHeader(int hdtype)
             rc = setupHDHeader_hdi(header, optC, optH, optS, optB);
             break;
         case DISK_NHD:
-            header_size = HDI_HEADERSIZE;
+            header_size = NHD_HEADERSIZE;
             header = my_malloc(header_size);
             rc = setupHDHeader_nhd(header, optC, optH, optS, optB);
             break;
