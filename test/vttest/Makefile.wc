@@ -1,0 +1,28 @@
+#
+# makefile for (Open)Watcom
+# built for Win32 and DOS
+#
+# wmake -h -f Makefile.wc
+#
+
+.ERASE
+
+RM_F=rm -f
+
+CFLAGS_D16 = -bt=dos
+CFLAGS_W32 = -bt=nt
+CFLAGS = -zq -s -fr -ot
+
+vttest.exe : vttest.c
+	wcl $(CFLAGS) $(CFLAGS_D16) -fe=_vttd16.exe $[@
+	wcl386 $(CFLAGS) $(CFLAGS_D32) -fe=$@ $[@ -"op stub=_vttd16.exe"
+	-$(RM_F) _vttd16.exe
+
+#vtt_d16.exe : vttest.c
+#	wcl $(CFLAGS) $(CFLAGS_D16) -fe=$@ $[@
+
+clean: .SYMBOLIC
+	-$(RM_F) *.obj *.err
+	-$(RM_F) vttest.exe _vttd16.exe
+
+
