@@ -58,7 +58,7 @@
 #include <dos.h>
 #endif
 
-#if (defined(_MSC_VER) || (defined(__TURBOC__) && __TURBOC__ > 0x0502)) && !defined(snprintf)
+#if (defined(_MSC_VER) || (defined(__TURBOC__) && __TURBOC__ >= 0x0520)) && !defined(snprintf)
 #define snprintf _snprintf
 #endif
 
@@ -462,22 +462,22 @@ const char *csr_tomsg(int n)
     const char *s;
 
     switch (n) {
-        case CSR_NEXT:          /* 次の文字位置に移動。必要に応じて次行先頭へ */
+        case CSR_NEXT:
             s = "move next";
             break;
-        case CSR_CURRENT:       /* 表示した文字位置に留まり、移動しない */
+        case CSR_CURRENT:
             s = "don't move";
             break;
-        case CSR_NEXT_NONL:     /* 次の表示文字に移動。ただし次行には行かない */
+        case CSR_NEXT_NONL:
             s = "move next but don't wrap into new line";
             break;
-        case CSR_OVER_COLUMNS:  /* カーソル位置が画面外に出る（ESC[6nで返される桁位置が画面の桁数より大きくなる）  */
+        case CSR_OVER_COLUMNS:
             s = "out of screen columns";
             break;
-        case CSR_NEXT_AFTER_ROLLUP: /* 画面スクロールアップ後、次の表示文字に移動。必要に応じて次行先頭へ */
+        case CSR_NEXT_AFTER_ROLLUP:
             s = "rollup, then move next";
             break;
-        case CSR_CURRENT_AFTER_ROLLUP:  /* 画面スクロールアップ後、表示した文字位置に留まる（つまり現在の行位置は -1 される）*/
+        case CSR_CURRENT_AFTER_ROLLUP:
             s = "rollup and stay";
             break;
         case -1:
