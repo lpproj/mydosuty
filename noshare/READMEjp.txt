@@ -28,5 +28,5 @@ CONFIG.SYSの処理が終了後、NOSHARE.COMは自動的に常駐解除され�
 ソース
 ------
 
-https://github.com/lpproj/mydosuty/noshare/
+https://github.com/lpproj/mydosuty/tree/master/noshare
 
