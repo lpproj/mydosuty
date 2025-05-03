@@ -77,9 +77,9 @@ int 21h DOSファンクションコール一覧
 - int 21h AH=40h ファイル書き込み(write)もしくはファイル長設定 rbint:[D-2140](http://www.delorie.com/djgpp/doc/rbinter/id/02/28.html)
 - int 21h AH=41h ファイル削除(unlink) rbint:[D-2141](http://www.delorie.com/djgpp/doc/rbinter/id/08/28.html)
 - int 21h AH=42h ファイルポインタ設定(lseek) rbint:[D-2142](http://www.delorie.com/djgpp/doc/rbinter/id/10/28.html)
-- int 21h AH=43h ファイル属性取得／設定
+- int 21h AH=43h ファイル属性取得／設定(attrib/chmod)
   - int 21h AX=4300h ファイル属性取得 rbint:[D-214300](http://www.delorie.com/djgpp/doc/rbinter/id/13/28.html)
-  - int 21h AX=4301h ファイル属性設定(chmod) rbint:[D-214301](http://www.delorie.com/djgpp/doc/rbinter/id/14/28.html)
+  - int 21h AX=4301h ファイル属性設定 rbint:[D-214301](http://www.delorie.com/djgpp/doc/rbinter/id/14/28.html)
 - int 21h AH=44h IOCTL  → [index](http://www.delorie.com/djgpp/doc/rbinter/ix/21/44.html)
   - int 21h AX=4400h ファイルハンドルのデバイス情報取得(isatty) rbint:[D-214400](http://www.delorie.com/djgpp/doc/rbinter/id/32/28.html)
   - int 21h AX=4401h ファイルハンドルのデバイス設定(キャラクターデバイス) rbint:[D-214401](http://www.delorie.com/djgpp/doc/rbinter/id/33/28.html)
@@ -182,6 +182,7 @@ int 21h以外のDOS機能・コールバックハンドラ
 
 - int 29h 高速文字出力 rbint:[D-29](http://www.delorie.com/djgpp/doc/rbinter/id/40/41.html)
 
+- int 2Eh コマンド実行 \(COMMAND.COM) rbint:[l-2E](http://www.delorie.com/djgpp/doc/rbinter/id/64/42.html)
 
 
 表・データ構造
@@ -197,8 +198,9 @@ int 21h以外のDOS機能・コールバックハンドラ
   - DOS 1.x rbint:[Table 01357](http://www.delorie.com/djgpp/doc/rbinter/it/57/13.html)
   - DOS 2+ rbint:[Table 01395](http://www.delorie.com/djgpp/doc/rbinter/it/95/13.html)
 - PSP(プログラムセグメントプレフィックス) rbint:[Table 01378](http://www.delorie.com/djgpp/doc/rbinter/it/78/13.html)
-- DOS拡張エラーコード　rbint:[Table 01680](http://www.delorie.com/djgpp/doc/rbinter/it/80/16.html)
+- DOS拡張エラーコード rbint:[Table 01680](http://www.delorie.com/djgpp/doc/rbinter/it/80/16.html)
 - ファイル検索データブロック(findfirst data block) rbint:[Table 01626](http://www.delorie.com/djgpp/doc/rbinter/it/26/16.html)
+- ファイル属性値 rbint:[Table 01420](http://www.delorie.com/djgpp/doc/rbinter/id/89/29.html)
 - EXEヘッダ rbint:[Table 01594](http://www.delorie.com/djgpp/doc/rbinter/it/94/15.html)
 - List of Lists (SYSVARS) rbint:[Table 01627](http://www.delorie.com/djgpp/doc/rbinter/it/27/16.html)
 - MCB(メモリ制御ブロック) rbint:[Table 01628](http://www.delorie.com/djgpp/doc/rbinter/it/28/16.html)
@@ -225,6 +227,7 @@ int 21h以外のDOS機能・コールバックハンドラ
 - SDA(スワッパブルデータエリア)
   - DOS 3.1～3.30 rbint:[Table 01687](http://www.delorie.com/djgpp/doc/rbinter/it/87/16.html)
   - DOS 4+ rbint:[Table 01690](http://www.delorie.com/djgpp/doc/rbinter/it/90/16.html)
+- 国別情報テーブル rbint:[Table 01399](http://www.delorie.com/djgpp/doc/rbinter/it/99/13.html)
 - 拡張国別情報テーブル rbint:[Table 01750](http://www.delorie.com/djgpp/doc/rbinter/it/50/17.html)
 
 
@@ -303,7 +306,9 @@ int 29hはコンソールドライバ内部の文字表示ルーチンを直接�
 カテゴリ別：ファイル検索、属性
 ------------------------------
 
-ファイル名を指定してファイル時刻を変更するファンクション（lstat相当）は存在しないようだ。時刻変更する場合は当該ファイルをオープンする必要がある。逆にファイル属性の取得や変更はファイル名指定で行い、ハンドル経由のファンクションコールは存在しない。
+ファイル名を指定してファイル時刻を変更するファンクション（lstat相当）は存在しないようだ。
+ファイル更新日時を特定の時刻に変更したい場合は、当該ファイルを **リードオンリーモードで** オープンし、Func 5701hで時刻を設定したのち、ファイルをクローズする必要がある。
+逆にファイル属性の取得や変更はファイル名指定で行い、ハンドル経由のファンクションコールは存在しない。
 
 
 - int 21h AX=4300h ファイル属性取得 rbint:[D-214300](http://www.delorie.com/djgpp/doc/rbinter/id/13/28.html)
@@ -322,8 +327,10 @@ int 29hはコンソールドライバ内部の文字表示ルーチンを直接�
 カテゴリ別：ファイル操作（FCB）
 -------------------------------
 
-DOS 1.x時代のファイルアクセス法であり、DOS 3以上では疑似的にサポートされる。サブディレクトリが使えず、ファイルへの読み書きは128バイト単位になるため、使わないほうがよい。
-…ただし、ボリュームラベルの作成と削除はFCB経由で行う必要がある。
+DOS 1.x時代のファイルアクセス法であり、DOS 3以上のネットワークドライブでは疑似的にサポートされる。
+サブディレクトリが使えず、ファイルへの読み書きは「レコード」と呼ばれる単位で行われる。1レコードはデフォルト設定で128バイトになる（設定はオープン後に変更可能だが、128バイトより大きな値にした場合はDTAのサイズもその分だけ必要になる）。
+
+どうしてもDOS 1.xで動作するプログラムを作りたい場合以外で使うメリットはないが、ボリュームラベルの作成と削除はDOS 2.0以降でもFCB経由で行う必要がある。
 
 - int 21h AH=0Fh FCBによるファイルオープン rbint:[D-210F](http://www.delorie.com/djgpp/doc/rbinter/id/85/25.html)
 - int 21h AH=16h FCBによるファイル作成
@@ -344,6 +351,7 @@ rbint:[D-211F](http://www.delorie.com/djgpp/doc/rbinter/id/05/26.html)
 - int 21h AH=29h ファイル名をFCB形式に変換 rbint:[D-2129](http://www.delorie.com/djgpp/doc/rbinter/id/96/26.html)
 - int 21h AH=2Fh DTA(ディスク転送エリア)アドレス取得 rbint:[D-212F](http://www.delorie.com/djgpp/doc/rbinter/id/21/27.html)
 - int 21h AH=1Ah DTA(ディスク転送エリア)設定 rbint:[D-211A](http://www.delorie.com/djgpp/doc/rbinter/id/00/26.html)
+
 
 カテゴリ別：ディスク読み込み／書き込み
 --------------------------------------
@@ -412,14 +420,13 @@ rbint:[D-217305CXFFFF](http://www.delorie.com/djgpp/doc/rbinter/id/42/32.html)
 
 - int 21h AH=59h BX=0000h 拡張エラー情報の取得 rbint:[D-2159--BX0000](http://www.delorie.com/djgpp/doc/rbinter/id/24/30.html)
 - int 21h AX=5D0Ah 拡張エラーコード設定 rbint:[D-215D0A](http://www.delorie.com/djgpp/doc/rbinter/id/39/30.html)
-- DOS拡張エラーコード　rbint:[Table 01680](http://www.delorie.com/djgpp/doc/rbinter/it/80/16.html)
+- DOS拡張エラーコード rbint:[Table 01680](http://www.delorie.com/djgpp/doc/rbinter/it/80/16.html)
 
 - デバイスドライバ ステータスコード rbint:[Table 02596](http://www.delorie.com/djgpp/doc/rbinter/it/96/25.html) とエラーコード rbint:[Table 02598](http://www.delorie.com/djgpp/doc/rbinter/it/98/25.html)
 
 - int 23h Ctrl-Cハンドラ rbint:[D-23](http://www.delorie.com/djgpp/doc/rbinter/id/25/41.html)
 
 - int 24h 致命的エラーハンドラ rbint:[D-24](http://www.delorie.com/djgpp/doc/rbinter/id/27/41.html)
-
 
 
 カテゴリ別：システム情報
@@ -441,6 +448,9 @@ rbint:[D-217305CXFFFF](http://www.delorie.com/djgpp/doc/rbinter/id/42/32.html)
 - int 21h AX=3701h オプションスイッチ用の文字(SWITCHAR)設定 rbint:[D-213701](http://www.delorie.com/djgpp/doc/rbinter/id/64/27.html)
 - int 21h AX=3305h (DOS 4+) 起動ドライブ取得 rbint:[D-213305](http://www.delorie.com/djgpp/doc/rbinter/id/40/27.html)
 - int 21h AH=34h InDOSフラグのアドレス取得 rbint:[D-2134](http://www.delorie.com/djgpp/doc/rbinter/id/50/27.html)
+- int 21h AH=38h 国別情報の取得／設定 rbint:[D-2138](http://www.delorie.com/djgpp/doc/rbinter/id/84/27.html)
 - int 21h AH=52h List of Lists(SYSVARS)取得 rbint:[D-2152](http://www.delorie.com/djgpp/doc/rbinter/id/95/29.html)
 - int 21h AX=5D06h SDA(スワッパブルデータエリア)アドレス取得 rbint:[D-215D06](http://www.delorie.com/djgpp/doc/rbinter/id/35/30.html)
+  - DOS 4+ SDA rbint:[Table 01690](http://www.delorie.com/djgpp/doc/rbinter/it/90/16.html)
 - int 21h AX=6300h DBCSベクター情報の取得 rbint:[D-216300](http://www.delorie.com/djgpp/doc/rbinter/id/56/31.html)
+- int 21h AX=6501h～6507h 拡張国別情報の取得 rbint:[D-2165](http://www.delorie.com/djgpp/doc/rbinter/id/76/31.html)
