@@ -200,7 +200,7 @@ int 21h以外のDOS機能・コールバックハンドラ
 - PSP(プログラムセグメントプレフィックス) rbint:[Table 01378](http://www.delorie.com/djgpp/doc/rbinter/it/78/13.html)
 - DOS拡張エラーコード rbint:[Table 01680](http://www.delorie.com/djgpp/doc/rbinter/it/80/16.html)
 - ファイル検索データブロック(findfirst data block) rbint:[Table 01626](http://www.delorie.com/djgpp/doc/rbinter/it/26/16.html)
-- ファイル属性値 rbint:[Table 01420](http://www.delorie.com/djgpp/doc/rbinter/id/89/29.html)
+- ファイル属性値 rbint:[Table 01420](http://www.delorie.com/djgpp/doc/rbinter/it/20/14.html)
 - EXEヘッダ rbint:[Table 01594](http://www.delorie.com/djgpp/doc/rbinter/it/94/15.html)
 - List of Lists (SYSVARS) rbint:[Table 01627](http://www.delorie.com/djgpp/doc/rbinter/it/27/16.html)
 - MCB(メモリ制御ブロック) rbint:[Table 01628](http://www.delorie.com/djgpp/doc/rbinter/it/28/16.html)
