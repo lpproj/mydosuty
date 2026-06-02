@@ -1,0 +1,5 @@
+#
+*.c     text working-tree-encoding=CP932 eol=auto
+*.asm   text working-tree-encoding=CP932 eol=auto
+*.txt   text working-tree-encoding=CP932 eol=crlf
+
